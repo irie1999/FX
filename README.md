@@ -108,6 +108,78 @@ python tools/walk_forward.py --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" \
 - HTML レポートには窓ごとの詳細 + パラメータ安定性（どのパラメータが何回選ばれたか）も含む
 - 判定: **OOS PF > 1.5 なら本物**、OOS PF < 1.0 ならカーブフィット
 
+## 毎朝のシグナル出力（手動発注向け）
+
+SBI FX トレード等の自動売買 API が無い業者で運用する場合、**毎朝アルゴリズムの指示を確認 → 手でアプリから発注** というフローが現実的です。そのための専用ツール:
+
+```bash
+python tools/daily_signal.py \
+    --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" \
+    --resample 1d --strategy adaptive \
+    --size 1000 --stop-atr 1.25 --spread 0.02 \
+    --output results/signal.txt \
+    --json results/signal.json
+```
+
+出力は「現在の状態」と「翌バーで何をするか」を SBI アプリの操作手順付きで表示:
+
+```
+============================================================
+ 📅 FX 取引シグナル — 作成: 2026-04-02 07:00
+============================================================
+ 通貨ペア      : USD/JPY
+ データ最終    : 2026-04-01 00:00:00+00:00
+ 現在値        : 158.8500
+ 現在のポジション: ロング 1,000 通貨
+   エントリー日  : 2025-10-17
+   エントリー値  : 150.5830
+   含み損益      : ¥+8,267
+   ストップ水準  : 148.7500
+
+------------------------------------------------------------
+ 📌 翌バーのアクション: ロング継続
+------------------------------------------------------------
+  → 既存ポジションを継続保有。ストップ注文はそのまま維持。
+============================================================
+```
+
+新規エントリー時は SBI アプリでの具体的な発注手順が出ます:
+```
+ 【SBI FX アプリでの手順】
+  1. USD/JPY を選択
+  2. 『新規』成行注文
+  3. 『買い』 1,000 通貨
+  4. 逆指値 (ストップ) を 156.500 にセット
+
+ 💰 想定リスク (ストップ到達時): ¥-2,350
+```
+
+### Discord / Slack へ自動通知
+
+LINE Notify は 2025-03 で終了したので後継として Discord または Slack を使います。どちらも Webhook URL を 1 行貼り付けるだけ:
+
+```bash
+python tools/daily_signal.py \
+    --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" \
+    --resample 1d --strategy adaptive --size 1000 --stop-atr 1.25 \
+    --webhook "https://discord.com/api/webhooks/xxxxxx/yyyyyy"
+```
+
+### Windows Task Scheduler で毎朝自動実行
+
+1. データ更新: 月初に `python tools/fetch_histdata.py --pair USDJPY --months YYYY-MM` を走らせるタスク
+2. シグナル生成: 平日 07:05 (JST) に上記コマンドを走らせるタスク
+3. Webhook 通知で携帯に届く → SBI アプリで発注
+
+タスク作成例 (PowerShell):
+```powershell
+$action = New-ScheduledTaskAction -Execute "python" `
+    -Argument "tools\daily_signal.py --histdata data\raw\DAT_ASCII_USDJPY_M1_*.csv --resample 1d --strategy adaptive --size 1000 --stop-atr 1.25 --webhook YOUR_URL" `
+    -WorkingDirectory (Get-Location)
+$trigger = New-ScheduledTaskTrigger -Daily -At 7:05am
+Register-ScheduledTask -TaskName "FX Daily Signal" -Action $action -Trigger $trigger
+```
+
 ## デイトレ (ライブ / ペーパー)
 
 `tools/live_trade.py` は戦略を「今の相場」で回し、OANDA 経由で発注します。デフォルトは**ペーパー（模擬）**、実運用は明示的に `--broker oanda --live` を付けた場合のみ。
