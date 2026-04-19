@@ -12,13 +12,16 @@ Each module exposes:
 
 from __future__ import annotations
 
-from . import bollinger, donchian, orb, sma_rsi
+from . import bollinger, donchian, ichimoku, macd, orb, sma_rsi, supertrend
 
 REGISTRY = {
     sma_rsi.NAME: sma_rsi,
     orb.NAME: orb,
     bollinger.NAME: bollinger,
     donchian.NAME: donchian,
+    macd.NAME: macd,
+    supertrend.NAME: supertrend,
+    ichimoku.NAME: ichimoku,
 }
 
 

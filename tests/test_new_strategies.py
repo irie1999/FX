@@ -26,8 +26,10 @@ def _ranging_df(n=200, freq="15min"):
     )
 
 
-def test_registry_has_four_strategies():
-    assert set(strategies.names()) == {"sma_rsi", "orb", "bollinger", "donchian"}
+def test_registry_has_base_strategies():
+    # Exact membership is asserted by tests/test_swing_strategies.py; here we
+    # only require the original four are still present.
+    assert {"sma_rsi", "orb", "bollinger", "donchian"}.issubset(set(strategies.names()))
 
 
 def test_orb_long_after_breakout_in_uptrend():
