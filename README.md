@@ -96,6 +96,7 @@ python -m fx.main --synthetic --html --no-open
 - `--slow` 長期 SMA 期間 (default 50)
 - `--rsi` RSI 期間 (default 14)
 - `--rsi-upper` / `--rsi-lower` RSI フィルタの閾値
+- `--stop-atr N` ATR ベースのストップロス (N × ATR 距離で自動決済)
 - `--spread` スプレッド (price units)
 - `--size` 1 トレードの枚数
 

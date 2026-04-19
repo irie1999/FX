@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 
 from . import data as data_mod
-from .backtest import BacktestConfig, run_backtest
+from .backtest import BacktestConfig, StopConfig, run_backtest
 from .metrics import compute_performance, format_performance
 from .strategy import StrategyParams, generate_signals
 
@@ -43,6 +43,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--size", type=float, default=10_000.0, help="Units per trade")
     p.add_argument("--spread", type=float, default=0.02, help="Spread in price units")
     p.add_argument("--equity", type=float, default=500_000.0, help="Initial equity (default 500,000)")
+
+    p.add_argument(
+        "--stop-atr",
+        type=float,
+        default=None,
+        metavar="N",
+        help="Enable ATR-based stop-loss at N * ATR(rsi_period) distance from entry. "
+             "e.g. --stop-atr 2 uses a 2-ATR stop. Omit to disable.",
+    )
 
     p.add_argument("--save-equity", type=Path, help="Optional CSV path to save equity curve")
     p.add_argument("--save-trades", type=Path, help="Optional CSV path to save trades")
@@ -86,7 +95,8 @@ def main(argv: list[str] | None = None) -> int:
     signals = generate_signals(df, params)
 
     cfg = BacktestConfig(size=args.size, spread=args.spread, initial_equity=args.equity)
-    result = run_backtest(signals, cfg)
+    stops = StopConfig(enabled=args.stop_atr is not None, atr_mult=args.stop_atr or 0.0)
+    result = run_backtest(signals, cfg, stops=stops)
 
     perf = compute_performance(
         result.equity,
@@ -99,7 +109,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Bars       : {len(df)}")
     print(f"Period     : {df.index[0]} -> {df.index[-1]}")
     print(f"Params     : fast={params.fast} slow={params.slow} rsi={params.rsi_period}")
-    print(f"Spread     : {cfg.spread}  Size: {cfg.size}  Equity0: {cfg.initial_equity:.0f}")
+    stop_txt = f"{stops.atr_mult}*ATR" if stops.enabled else "off"
+    print(f"Spread     : {cfg.spread}  Size: {cfg.size}  Equity0: {cfg.initial_equity:.0f}  Stop: {stop_txt}")
     print("-" * 40)
     print(format_performance(perf))
 
@@ -112,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
         # Lazy import so matplotlib isn't required unless the user wants HTML.
         from .report import write_html
 
-        out = write_html(args.html, result, perf, params, cfg, title=args.title)
+        out = write_html(args.html, result, perf, params, cfg, title=args.title, stops=stops)
         print(f"HTML report: {out.resolve()}")
         if args.open:
             import webbrowser

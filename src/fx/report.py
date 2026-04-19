@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from .backtest import BacktestConfig, BacktestResult  # noqa: E402
+from .backtest import BacktestConfig, BacktestResult, StopConfig  # noqa: E402
 from .metrics import Performance, monthly_pnl  # noqa: E402
 from .strategy import StrategyParams  # noqa: E402
 
@@ -238,7 +238,15 @@ def _monthly_table(monthly: pd.DataFrame) -> str:
     )
 
 
-def _params_table(params: StrategyParams, cfg: BacktestConfig, period: tuple) -> str:
+def _params_table(
+    params: StrategyParams,
+    cfg: BacktestConfig,
+    period: tuple,
+    stops: StopConfig | None = None,
+) -> str:
+    stop_desc = (
+        f"{stops.atr_mult} × ATR" if stops and stops.enabled else "無効"
+    )
     rows = [
         ("期間開始", str(period[0])),
         ("期間終了", str(period[1])),
@@ -247,6 +255,7 @@ def _params_table(params: StrategyParams, cfg: BacktestConfig, period: tuple) ->
         ("長期 SMA", str(params.slow)),
         ("RSI 期間", str(params.rsi_period)),
         ("RSI 上限 / 下限", f"{params.rsi_upper} / {params.rsi_lower}"),
+        ("ストップロス", stop_desc),
         ("取引枚数", f"{cfg.size:,.0f}"),
         ("スプレッド", f"{cfg.spread}"),
         ("初期資金", f"{cfg.initial_equity:,.0f}"),
@@ -345,6 +354,7 @@ def render_html(
     params: StrategyParams,
     cfg: BacktestConfig,
     title: str = "FX バックテストレポート",
+    stops: StopConfig | None = None,
 ) -> str:
     """Return a fully self-contained Japanese HTML document as a string."""
     eq_b64 = _plot_equity_drawdown(result.equity)
@@ -354,7 +364,7 @@ def render_html(
     period = (result.equity.index[0], result.equity.index[-1], len(result.equity))
     summary = _summary_table(perf)
     metrics = _metrics_table(perf)
-    paramsT = _params_table(params, cfg, period)
+    paramsT = _params_table(params, cfg, period, stops=stops)
     monthly = monthly_pnl(result.equity, perf.initial_equity)
     monthly_html = _monthly_table(monthly)
     trades_html = _trades_table(result.trades)
@@ -421,8 +431,9 @@ def write_html(
     params: StrategyParams,
     cfg: BacktestConfig,
     title: str = "FX バックテストレポート",
+    stops: StopConfig | None = None,
 ) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_html(result, perf, params, cfg, title), encoding="utf-8")
+    path.write_text(render_html(result, perf, params, cfg, title, stops=stops), encoding="utf-8")
     return path
