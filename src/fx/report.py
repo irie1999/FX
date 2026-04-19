@@ -62,9 +62,45 @@ def _t(jp: str, en: str) -> str:
     return jp if _JP_OK else en
 
 
+# Chart palette matching the dark HTML theme
+_DARK = {
+    "bg": "#161b22",        # panel
+    "fig_bg": "#0e1117",    # page
+    "text": "#e6edf3",
+    "grid": "#2a313c",
+    "eq": "#58a6ff",
+    "dd": "#f85149",
+    "sma_fast": "#3fb950",
+    "sma_slow": "#f0883e",
+    "long": "#3fb950",
+    "short": "#f85149",
+    "zero": "#8b949e",
+    "close": "#c9d1d9",
+}
+
+
+def _apply_dark_axes(*axes) -> None:
+    for ax in axes:
+        ax.set_facecolor(_DARK["bg"])
+        ax.tick_params(colors=_DARK["text"])
+        for spine in ax.spines.values():
+            spine.set_color(_DARK["grid"])
+        ax.grid(True, color=_DARK["grid"], alpha=0.6)
+        ax.yaxis.label.set_color(_DARK["text"])
+        ax.xaxis.label.set_color(_DARK["text"])
+        ax.title.set_color(_DARK["text"])
+
+
 def _fig_to_base64(fig) -> str:
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight", dpi=110)
+    fig.savefig(
+        buf,
+        format="png",
+        bbox_inches="tight",
+        dpi=110,
+        facecolor=_DARK["fig_bg"],
+        edgecolor="none",
+    )
     plt.close(fig)
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
@@ -76,19 +112,19 @@ def _plot_equity_drawdown(equity: pd.Series) -> str:
     fig, (ax1, ax2) = plt.subplots(
         2, 1, figsize=(11, 6), sharex=True, gridspec_kw={"height_ratios": [3, 1]}
     )
-    ax1.plot(equity.index, equity.values, color="#1f77b4", linewidth=1.2)
+    fig.patch.set_facecolor(_DARK["fig_bg"])
+    ax1.plot(equity.index, equity.values, color=_DARK["eq"], linewidth=1.2)
     ax1.set_title(_t("資産推移", "Equity curve"))
-    ax1.grid(alpha=0.3)
     ax1.set_ylabel(_t("資産", "Equity"))
 
-    ax2.fill_between(drawdown.index, drawdown.values, 0, color="#d62728", alpha=0.5)
+    ax2.fill_between(drawdown.index, drawdown.values, 0, color=_DARK["dd"], alpha=0.5)
     ax2.set_title(_t("ドローダウン", "Drawdown"))
-    ax2.grid(alpha=0.3)
     ax2.set_ylabel(_t("DD", "DD"))
     ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0%}"))
 
     ax2.xaxis.set_major_locator(mdates.AutoDateLocator())
     ax2.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax2.xaxis.get_major_locator()))
+    _apply_dark_axes(ax1, ax2)
     fig.tight_layout()
     return _fig_to_base64(fig)
 
@@ -100,22 +136,25 @@ def _plot_price_signals(signals: pd.DataFrame, max_points: int = 4000) -> str:
         df = df.iloc[::stride]
 
     fig, ax = plt.subplots(figsize=(11, 4))
-    ax.plot(df.index, df["close"], color="#333", linewidth=0.8, label=_t("終値", "close"))
+    fig.patch.set_facecolor(_DARK["fig_bg"])
+    ax.plot(df.index, df["close"], color=_DARK["close"], linewidth=0.8, label=_t("終値", "close"))
     if "sma_fast" in df:
-        ax.plot(df.index, df["sma_fast"], color="#2ca02c", linewidth=0.9, label=_t("短期 SMA", "SMA fast"))
+        ax.plot(df.index, df["sma_fast"], color=_DARK["sma_fast"], linewidth=0.9, label=_t("短期 SMA", "SMA fast"))
     if "sma_slow" in df:
-        ax.plot(df.index, df["sma_slow"], color="#ff7f0e", linewidth=0.9, label=_t("長期 SMA", "SMA slow"))
+        ax.plot(df.index, df["sma_slow"], color=_DARK["sma_slow"], linewidth=0.9, label=_t("長期 SMA", "SMA slow"))
 
     longs = df[df["signal"] == 1]
     shorts = df[df["signal"] == -1]
-    ax.scatter(longs.index, longs["close"], marker="^", s=12, color="#2ca02c", alpha=0.5, label=_t("買い", "long"))
-    ax.scatter(shorts.index, shorts["close"], marker="v", s=12, color="#d62728", alpha=0.5, label=_t("売り", "short"))
+    ax.scatter(longs.index, longs["close"], marker="^", s=14, color=_DARK["long"], alpha=0.7, label=_t("買い", "long"))
+    ax.scatter(shorts.index, shorts["close"], marker="v", s=14, color=_DARK["short"], alpha=0.7, label=_t("売り", "short"))
 
     ax.set_title(_t("価格とシグナル", "Price with signals"))
-    ax.grid(alpha=0.3)
-    ax.legend(loc="best", fontsize=8)
+    leg = ax.legend(loc="best", fontsize=8, facecolor=_DARK["bg"], edgecolor=_DARK["grid"])
+    for text in leg.get_texts():
+        text.set_color(_DARK["text"])
     ax.xaxis.set_major_locator(mdates.AutoDateLocator())
     ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax.xaxis.get_major_locator()))
+    _apply_dark_axes(ax)
     fig.tight_layout()
     return _fig_to_base64(fig)
 
@@ -124,12 +163,13 @@ def _plot_trade_pnl(trades: pd.DataFrame) -> str | None:
     if trades is None or len(trades) == 0:
         return None
     fig, ax = plt.subplots(figsize=(11, 3))
-    colors = ["#2ca02c" if v >= 0 else "#d62728" for v in trades["pnl"]]
+    fig.patch.set_facecolor(_DARK["fig_bg"])
+    colors = [_DARK["long"] if v >= 0 else _DARK["short"] for v in trades["pnl"]]
     ax.bar(range(len(trades)), trades["pnl"], color=colors, width=0.9)
-    ax.axhline(0, color="#333", linewidth=0.5)
+    ax.axhline(0, color=_DARK["zero"], linewidth=0.6)
     ax.set_title(_t("トレード別損益", "Per-trade PnL"))
     ax.set_xlabel(_t("トレード番号", "Trade #"))
-    ax.grid(alpha=0.3, axis="y")
+    _apply_dark_axes(ax)
     fig.tight_layout()
     return _fig_to_base64(fig)
 
@@ -250,28 +290,52 @@ def _trades_table(trades: pd.DataFrame, limit: int = 50) -> str:
 
 
 _CSS = """
+:root {
+  --bg: #0e1117;
+  --panel: #161b22;
+  --panel-2: #1c222c;
+  --border: #2a313c;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --pos: #3fb950;
+  --neg: #f85149;
+}
+html, body { background: var(--bg); }
 body { font-family: "Yu Gothic UI", "Yu Gothic", "Meiryo", "Hiragino Sans",
        "Noto Sans CJK JP", -apple-system, BlinkMacSystemFont, "Segoe UI",
        Roboto, Helvetica, Arial, sans-serif;
-       color: #222; max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
+       color: var(--text); max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
+h1, h2 { color: var(--text); letter-spacing: 0.02em; }
 h1 { margin-bottom: 0.2rem; }
-.muted { color: #777; font-size: 0.9em; }
+h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+.muted, p.muted { color: var(--muted); font-size: 0.9em; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1rem 0; }
-table.kv { border-collapse: collapse; width: 100%; }
-table.kv th, table.kv td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #eee; }
-table.kv th { color: #555; font-weight: 500; width: 45%; }
-table.trades { border-collapse: collapse; width: 100%; font-size: 0.88em; }
-table.trades th, table.trades td { text-align: right; padding: 4px 8px; border-bottom: 1px solid #eee; }
+table.kv, table.trades {
+  border-collapse: collapse; width: 100%;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  overflow: hidden;
+}
+table.kv th, table.kv td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+table.kv tr:last-child th, table.kv tr:last-child td { border-bottom: none; }
+table.kv th { color: var(--muted); font-weight: 500; width: 45%; background: var(--panel-2); }
+table.kv td { color: var(--text); }
+table.trades { font-size: 0.88em; }
+table.trades th, table.trades td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+table.trades thead th { background: var(--panel-2); color: var(--muted); font-weight: 500; }
 table.trades th:first-child, table.trades td:first-child,
 table.trades th:nth-child(2), table.trades td:nth-child(2) { text-align: left; }
-img { max-width: 100%; height: auto; display: block; margin: 0.5rem 0; }
+table.trades tbody tr:hover { background: var(--panel-2); }
+img { max-width: 100%; height: auto; display: block; margin: 0.5rem 0;
+      border: 1px solid var(--border); border-radius: 6px; background: var(--panel); }
 section { margin: 2rem 0; }
-td.pos { color: #1b6b2a; font-weight: 500; }
-td.neg { color: #a9231a; font-weight: 500; }
+td.pos { color: var(--pos); font-weight: 500; }
+td.neg { color: var(--neg); font-weight: 500; }
 .summary table.kv th { width: 55%; }
-.summary table.kv td { font-weight: 600; font-size: 1.05em; }
+.summary table.kv td { font-weight: 600; font-size: 1.1em; color: var(--text); }
 .monthly th, .monthly td { text-align: right; }
 .monthly th:first-child, .monthly td:first-child { text-align: left; }
+::selection { background: rgba(88,166,255,0.35); }
 """
 
 
