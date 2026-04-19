@@ -17,7 +17,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from .backtest import BacktestConfig, BacktestResult  # noqa: E402
-from .metrics import Performance  # noqa: E402
+from .metrics import Performance, monthly_pnl  # noqa: E402
 from .strategy import StrategyParams  # noqa: E402
 
 
@@ -134,22 +134,68 @@ def _plot_trade_pnl(trades: pd.DataFrame) -> str | None:
     return _fig_to_base64(fig)
 
 
-def _metrics_table(perf: Performance) -> str:
-    pf = f"{perf.profit_factor:.2f}" if np.isfinite(perf.profit_factor) else "∞"
+def _fmt_yen(v: float) -> str:
+    return f"¥{v:,.0f}"
+
+
+def _summary_table(perf: Performance) -> str:
+    """Core money-focused summary shown first."""
     rows = [
+        ("初期資金", _fmt_yen(perf.initial_equity)),
+        ("最終資金", _fmt_yen(perf.final_equity)),
+        ("純損益", _fmt_yen(perf.net_profit)),
         ("総リターン", f"{perf.total_return:.2%}"),
         ("年率リターン (CAGR)", f"{perf.cagr:.2%}"),
-        ("シャープレシオ", f"{perf.sharpe:.2f}"),
         ("最大ドローダウン", f"{perf.max_drawdown:.2%}"),
-        ("勝率", f"{perf.win_rate:.2%}"),
-        ("トレード数", f"{perf.num_trades:d}"),
-        ("プロフィットファクター", pf),
-        ("平均トレード損益", f"{perf.avg_trade_pnl:,.2f}"),
     ]
     items = "".join(
         f"<tr><th>{html.escape(k)}</th><td>{html.escape(v)}</td></tr>" for k, v in rows
     )
     return f"<table class='kv'>{items}</table>"
+
+
+def _metrics_table(perf: Performance) -> str:
+    pf = f"{perf.profit_factor:.2f}" if np.isfinite(perf.profit_factor) else "∞"
+    rows = [
+        ("シャープレシオ", f"{perf.sharpe:.2f}"),
+        ("トレード数", f"{perf.num_trades:,d}  ({perf.num_wins}勝 / {perf.num_losses}敗)"),
+        ("勝率", f"{perf.win_rate:.2%}"),
+        ("プロフィットファクター", pf),
+        ("総利益 (勝ちトレード合計)", _fmt_yen(perf.gross_profit)),
+        ("総損失 (負けトレード合計)", _fmt_yen(perf.gross_loss)),
+        ("平均トレード損益", _fmt_yen(perf.avg_trade_pnl)),
+        ("平均利益 / 平均損失", f"{_fmt_yen(perf.avg_win)} / {_fmt_yen(perf.avg_loss)}"),
+        ("リスクリワード比", f"{perf.risk_reward:.2f}"),
+        ("最大利益トレード", _fmt_yen(perf.best_trade)),
+        ("最大損失トレード", _fmt_yen(perf.worst_trade)),
+        ("最大連勝 / 最大連敗", f"{perf.max_win_streak} / {perf.max_loss_streak}"),
+        ("平均保有本数", f"{perf.avg_holding_bars:.1f} bars"),
+        ("建玉時間比率 (相場にいた割合)", f"{perf.exposure:.2%}"),
+    ]
+    items = "".join(
+        f"<tr><th>{html.escape(k)}</th><td>{html.escape(v)}</td></tr>" for k, v in rows
+    )
+    return f"<table class='kv'>{items}</table>"
+
+
+def _monthly_table(monthly: pd.DataFrame) -> str:
+    if monthly is None or len(monthly) == 0:
+        return "<p class='muted'>月次データなし</p>"
+    thead = "<tr><th>月</th><th>損益</th><th>月次リターン</th></tr>"
+    rows_html = []
+    for _, row in monthly.iterrows():
+        pnl = float(row["pnl"])
+        ret = float(row["return"])
+        color = "pos" if pnl >= 0 else "neg"
+        rows_html.append(
+            f"<tr><td>{html.escape(str(row['month']))}</td>"
+            f"<td class='{color}'>{_fmt_yen(pnl)}</td>"
+            f"<td class='{color}'>{ret:.2%}</td></tr>"
+        )
+    return (
+        "<table class='trades monthly'><thead>" + thead + "</thead><tbody>"
+        + "".join(rows_html) + "</tbody></table>"
+    )
 
 
 def _params_table(params: StrategyParams, cfg: BacktestConfig, period: tuple) -> str:
@@ -220,6 +266,12 @@ table.trades th:first-child, table.trades td:first-child,
 table.trades th:nth-child(2), table.trades td:nth-child(2) { text-align: left; }
 img { max-width: 100%; height: auto; display: block; margin: 0.5rem 0; }
 section { margin: 2rem 0; }
+td.pos { color: #1b6b2a; font-weight: 500; }
+td.neg { color: #a9231a; font-weight: 500; }
+.summary table.kv th { width: 55%; }
+.summary table.kv td { font-weight: 600; font-size: 1.05em; }
+.monthly th, .monthly td { text-align: right; }
+.monthly th:first-child, .monthly td:first-child { text-align: left; }
 """
 
 
@@ -236,8 +288,11 @@ def render_html(
     trade_b64 = _plot_trade_pnl(result.trades)
 
     period = (result.equity.index[0], result.equity.index[-1], len(result.equity))
+    summary = _summary_table(perf)
     metrics = _metrics_table(perf)
     paramsT = _params_table(params, cfg, period)
+    monthly = monthly_pnl(result.equity, perf.initial_equity)
+    monthly_html = _monthly_table(monthly)
     trades_html = _trades_table(result.trades)
 
     trade_section = (
@@ -257,14 +312,24 @@ def render_html(
 <h1>{html.escape(title)}</h1>
 <p class="muted">fx.main による出力 — SMA クロス + RSI フィルタ戦略</p>
 
+<section class="summary">
+  <h2>損益サマリー</h2>
+  {summary}
+</section>
+
 <div class="grid">
-  <div><h2>パフォーマンス</h2>{metrics}</div>
+  <div><h2>詳細指標</h2>{metrics}</div>
   <div><h2>パラメータ</h2>{paramsT}</div>
 </div>
 
 <section>
   <h2>資産推移とドローダウン</h2>
   <img alt="equity" src="data:image/png;base64,{eq_b64}">
+</section>
+
+<section>
+  <h2>月次損益</h2>
+  {monthly_html}
 </section>
 
 <section>

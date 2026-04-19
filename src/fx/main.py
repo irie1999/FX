@@ -42,7 +42,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--size", type=float, default=10_000.0, help="Units per trade")
     p.add_argument("--spread", type=float, default=0.02, help="Spread in price units")
-    p.add_argument("--equity", type=float, default=1_000_000.0, help="Initial equity")
+    p.add_argument("--equity", type=float, default=500_000.0, help="Initial equity (default 500,000)")
 
     p.add_argument("--save-equity", type=Path, help="Optional CSV path to save equity curve")
     p.add_argument("--save-trades", type=Path, help="Optional CSV path to save trades")
@@ -88,7 +88,13 @@ def main(argv: list[str] | None = None) -> int:
     cfg = BacktestConfig(size=args.size, spread=args.spread, initial_equity=args.equity)
     result = run_backtest(signals, cfg)
 
-    perf = compute_performance(result.equity, result.returns, result.trades, cfg.initial_equity)
+    perf = compute_performance(
+        result.equity,
+        result.returns,
+        result.trades,
+        cfg.initial_equity,
+        position=result.position,
+    )
 
     print(f"Bars       : {len(df)}")
     print(f"Period     : {df.index[0]} -> {df.index[-1]}")

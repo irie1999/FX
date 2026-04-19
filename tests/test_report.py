@@ -26,13 +26,18 @@ def test_render_html_returns_valid_document():
     doc = render_html(result, perf, params, cfg, title="Unit Test Run")
     assert doc.startswith("<!doctype html>")
     assert "Unit Test Run" in doc
-    assert "パフォーマンス" in doc
+    assert "損益サマリー" in doc
+    assert "詳細指標" in doc
     assert "パラメータ" in doc
+    assert "月次損益" in doc
     # Embedded images are base64 PNGs
     assert "data:image/png;base64," in doc
-    # Metrics show up
-    assert "総リターン" in doc
+    # Core yen figures and metrics
+    assert "初期資金" in doc
+    assert "最終資金" in doc
+    assert "純損益" in doc
     assert "シャープレシオ" in doc
+    assert "最大利益トレード" in doc
 
 
 def test_write_html_creates_file(tmp_path):
