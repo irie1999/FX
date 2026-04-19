@@ -108,6 +108,54 @@ python tools/walk_forward.py --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" \
 - HTML レポートには窓ごとの詳細 + パラメータ安定性（どのパラメータが何回選ばれたか）も含む
 - 判定: **OOS PF > 1.5 なら本物**、OOS PF < 1.0 ならカーブフィット
 
+## デイトレ (ライブ / ペーパー)
+
+`tools/live_trade.py` は戦略を「今の相場」で回し、OANDA 経由で発注します。デフォルトは**ペーパー（模擬）**、実運用は明示的に `--broker oanda --live` を付けた場合のみ。
+
+```bash
+# 1) ペーパートレード（データ取得不要で挙動確認）
+python tools/live_trade.py --broker paper --once
+
+# 2) OANDA Japan のデモ口座で実発注（無料、無リスク）
+export OANDA_TOKEN=xxxxxxxx
+export OANDA_ACCOUNT=101-001-xxxxxxx-001
+python tools/live_trade.py --broker oanda --instrument USD_JPY --granularity M15 --size 10000
+
+# 3) 本番口座で実取引（自己責任！）
+python tools/live_trade.py --broker oanda --live --instrument USD_JPY --granularity M15 --size 10000
+```
+
+### OANDA Japan デモ口座のセットアップ
+
+1. https://www.oanda.jp/ でデモ口座を作成（無料、本人確認不要）
+2. 口座管理画面で **API token** を発行
+3. 口座 ID（`101-001-xxxxxxx-001` 形式）を控える
+4. 環境変数 `OANDA_TOKEN` と `OANDA_ACCOUNT` にセット
+5. 上記コマンド実行 → ログは `logs/live.log` に記録
+
+### デイトレ特有のルール
+
+- **EOD 強制決済**: デフォルト 21:00 UTC（NY クローズ）で全ポジション flat
+- オプション: `--eod-utc 23:00` で時刻変更
+- 15 分足デフォルト (`--granularity M15`); M1/M5/M30/H1/H4 も選択可
+- 1 バー確定ごとに自動ループ（`--once` で 1 回のみ）
+
+### 重要な安全装置
+
+- `--broker oanda` 指定時、デフォルトは `OANDA_ENV=practice`（デモ口座）
+- **実資金発注には必ず `--live` が必要**
+- `--dry-run`: シグナルだけ計算して発注しない
+- `--once`: 1 イテレーションで終了（cron / 手動検証用）
+- 全発注・シグナル・例外を `logs/live.log` に記録
+
+### ⚠️ 免責と注意
+
+- **このツールは教育・研究目的で提供**されています
+- FX 実取引には**スリッページ、約定拒否、サーバー障害、スプレッド拡大**等のリスクあり
+- 戦略のバックテスト成績は**将来の収益を保証しません**
+- デモで最低 **1〜3 ヶ月**動かし、バックテストと成績が一致することを確認してから少額の実資金を検討してください
+- 本ツールの利用による損失について作者は一切責任を負いません
+
 ## HTML レポート出力
 
 バックテスト結果を自己完結型の HTML レポートとして書き出せます（チャートは base64 PNG で埋め込み、外部リソース依存なし）。
