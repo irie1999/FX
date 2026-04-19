@@ -66,6 +66,27 @@ python -m fx.main --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" --resample 1h
 
 `--out` で保存先を変えられます。既に同名 CSV があればスキップします。
 
+## グリッドサーチ
+
+`tools/grid_search.py` でパラメータ空間を総当たりし、PF / Sharpe / MAR などでランキング。
+
+```bash
+python tools/grid_search.py --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" \
+    --resample 1d --equity 500000 \
+    --fast 10,15,20,30 --slow 30,50,75,100 \
+    --rsi-period 10,14,21 \
+    --stop-atr none,1.0,1.25,1.5,2.0 \
+    --top 30 --sort-by pf \
+    --html results/grid.html --csv-out results/grid.csv
+```
+
+- カンマ区切りで各軸の候補値を指定
+- `--stop-atr` に `none` を含めると「ストップ無効」も比較対象
+- `--sort-by` は `pf` / `sharpe` / `cagr` / `mar` / `net_profit` から選択
+- `--html` で上位 N 件をダークテーマ HTML で表示（`--no-open` でブラウザ起動抑止）
+- `--csv-out` で全組み合わせの結果を CSV 保存（分析・可視化に利用）
+- `fast >= slow` や `rsi_lower >= rsi_upper` の組み合わせは自動除外
+
 ## HTML レポート出力
 
 バックテスト結果を自己完結型の HTML レポートとして書き出せます（チャートは base64 PNG で埋め込み、外部リソース依存なし）。
