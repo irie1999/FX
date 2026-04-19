@@ -49,6 +49,23 @@ python -m fx.main --histdata "C:/Users/you/Downloads/" --resample 1h
 
 HistData のタイムスタンプは EST（DST なし、UTC-5）なので内部で UTC に変換されます。
 
+### HistData を自動ダウンロード
+
+ブラウザで手動 DL しなくても、`tools/fetch_histdata.py` がまとめて取得します（stdlib のみ、追加 pip install 不要）。
+
+```bash
+# 完了済みの年を年次 ZIP で取得
+python tools/fetch_histdata.py --pair USDJPY --years 2023 2024
+
+# 今年分は月単位で取得
+python tools/fetch_histdata.py --pair USDJPY --months 2026-01 2026-02 2026-03
+
+# そのままバックテストへ
+python -m fx.main --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" --resample 1h
+```
+
+`--out` で保存先を変えられます。既に同名 CSV があればスキップします。
+
 主要オプション:
 
 - `--fast` 短期 SMA 期間 (default 20)
