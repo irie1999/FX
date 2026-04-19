@@ -2,12 +2,98 @@
 
 from __future__ import annotations
 
+import glob as _glob
 from pathlib import Path
+from typing import Iterable
 
 import numpy as np
 import pandas as pd
 
 REQUIRED_COLS = ("open", "high", "low", "close")
+
+# HistData Generic ASCII M1: timestamps are EST with no DST adjustment (UTC-5).
+HISTDATA_TZ = "Etc/GMT+5"
+
+
+def _expand_paths(paths: str | Path | Iterable[str | Path]) -> list[Path]:
+    """Accept a single path, a glob pattern, a directory, or an iterable."""
+    if isinstance(paths, (str, Path)):
+        items: list[str | Path] = [paths]
+    else:
+        items = list(paths)
+
+    resolved: list[Path] = []
+    for item in items:
+        s = str(item)
+        # Directory: take all CSVs inside
+        p = Path(s)
+        if p.is_dir():
+            resolved.extend(sorted(p.glob("*.csv")))
+            continue
+        # Glob pattern (contains wildcards)
+        if any(ch in s for ch in "*?[]"):
+            matched = [Path(m) for m in _glob.glob(s)]
+            resolved.extend(sorted(matched))
+            continue
+        resolved.append(p)
+
+    # Deduplicate while preserving order
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    for p in resolved:
+        if p not in seen:
+            seen.add(p)
+            unique.append(p)
+    if not unique:
+        raise FileNotFoundError(f"No files matched: {paths!r}")
+    return unique
+
+
+def load_histdata(
+    paths: str | Path | Iterable[str | Path],
+    tz: str = HISTDATA_TZ,
+) -> pd.DataFrame:
+    """Load one or more HistData Generic ASCII M1 CSVs.
+
+    Accepts a single file, glob (e.g. 'C:/Users/.../DAT_ASCII_USDJPY_M1_*.csv'),
+    directory, or list of paths. Files are concatenated, deduplicated and sorted
+    by timestamp. The raw timestamps are EST-without-DST (UTC-5) and are
+    converted to UTC so the rest of the pipeline stays consistent.
+
+    HistData format (no header, semicolon-separated):
+        YYYYMMDD HHMMSS;open;high;low;close;volume
+    """
+    files = _expand_paths(paths)
+    frames: list[pd.DataFrame] = []
+    for fp in files:
+        df = pd.read_csv(
+            fp,
+            sep=";",
+            header=None,
+            names=["timestamp", "open", "high", "low", "close", "volume"],
+            dtype={"timestamp": str},
+        )
+        df["timestamp"] = pd.to_datetime(
+            df["timestamp"], format="%Y%m%d %H%M%S", errors="coerce"
+        )
+        if df["timestamp"].isna().any():
+            bad = df["timestamp"].isna().sum()
+            raise ValueError(f"{fp}: {bad} timestamps failed to parse")
+        df["timestamp"] = df["timestamp"].dt.tz_localize(tz).dt.tz_convert("UTC")
+        frames.append(df[["timestamp", "open", "high", "low", "close"]])
+
+    merged = pd.concat(frames, ignore_index=True)
+    merged = merged.drop_duplicates(subset="timestamp").sort_values("timestamp")
+    merged = merged.set_index("timestamp")
+    return merged[list(REQUIRED_COLS)].astype(float)
+
+
+def resample_ohlc(df: pd.DataFrame, rule: str) -> pd.DataFrame:
+    """Resample OHLC data to a coarser frequency (e.g. '5min', '1h', '1d')."""
+    out = df.resample(rule).agg(
+        {"open": "first", "high": "max", "low": "min", "close": "last"}
+    )
+    return out.dropna(how="any")
 
 
 def load_csv(path: str | Path) -> pd.DataFrame:

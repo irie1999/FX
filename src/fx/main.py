@@ -15,8 +15,22 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="FX SMA+RSI strategy backtest")
     src = p.add_mutually_exclusive_group(required=True)
     src.add_argument("--csv", type=Path, help="Path to OHLC CSV (timestamp,open,high,low,close)")
+    src.add_argument(
+        "--histdata",
+        nargs="+",
+        help=(
+            "HistData Generic ASCII M1 files. Accepts one or many paths, glob "
+            "patterns, or directories. e.g. "
+            'C:\\Users\\you\\Downloads\\DAT_ASCII_USDJPY_M1_*.csv'
+        ),
+    )
     src.add_argument("--synthetic", action="store_true", help="Use synthetic OHLC data")
 
+    p.add_argument(
+        "--resample",
+        default=None,
+        help="Resample loaded data to this pandas rule (e.g. '5min','1h','1d'). Useful for M1 sources.",
+    )
     p.add_argument("--bars", type=int, default=5000, help="Synthetic bars (default 5000)")
     p.add_argument("--seed", type=int, default=42, help="Synthetic data seed")
 
@@ -40,8 +54,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.synthetic:
         df = data_mod.synthetic_ohlc(bars=args.bars, seed=args.seed)
+    elif args.histdata:
+        df = data_mod.load_histdata(args.histdata)
     else:
         df = data_mod.load_csv(args.csv)
+
+    if args.resample:
+        df = data_mod.resample_ohlc(df, args.resample)
 
     params = StrategyParams(
         fast=args.fast,
