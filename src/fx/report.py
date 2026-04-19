@@ -1,17 +1,17 @@
-"""Render a self-contained HTML report for a backtest run."""
+"""Render a self-contained HTML report for a backtest run (Japanese)."""
 
 from __future__ import annotations
 
 import base64
 import html
 import io
-from dataclasses import asdict, is_dataclass
 from pathlib import Path
 
 import matplotlib
 
 matplotlib.use("Agg")  # headless rendering
 import matplotlib.dates as mdates  # noqa: E402
+import matplotlib.font_manager as fm  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
@@ -19,6 +19,47 @@ import pandas as pd  # noqa: E402
 from .backtest import BacktestConfig, BacktestResult  # noqa: E402
 from .metrics import Performance  # noqa: E402
 from .strategy import StrategyParams  # noqa: E402
+
+
+# Candidate Japanese-capable fonts on Windows / macOS / Linux
+_JP_FONT_CANDIDATES = (
+    "Yu Gothic",
+    "Yu Gothic UI",
+    "Meiryo",
+    "MS Gothic",
+    "MS PGothic",
+    "Hiragino Sans",
+    "Hiragino Kaku Gothic Pro",
+    "Hiragino Maru Gothic Pro",
+    "Noto Sans CJK JP",
+    "Noto Sans JP",
+    "IPAexGothic",
+    "IPAGothic",
+    "TakaoGothic",
+    "VL Gothic",
+)
+
+
+def _configure_jp_font() -> bool:
+    """Pick a Japanese-capable font if available and return True on success."""
+    try:
+        available = {f.name for f in fm.fontManager.ttflist}
+    except Exception:
+        return False
+    for name in _JP_FONT_CANDIDATES:
+        if name in available:
+            matplotlib.rcParams["font.family"] = name
+            matplotlib.rcParams["axes.unicode_minus"] = False
+            return True
+    return False
+
+
+_JP_OK = _configure_jp_font()
+
+
+def _t(jp: str, en: str) -> str:
+    """Use Japanese chart labels if a JP font is available, else English."""
+    return jp if _JP_OK else en
 
 
 def _fig_to_base64(fig) -> str:
@@ -36,14 +77,14 @@ def _plot_equity_drawdown(equity: pd.Series) -> str:
         2, 1, figsize=(11, 6), sharex=True, gridspec_kw={"height_ratios": [3, 1]}
     )
     ax1.plot(equity.index, equity.values, color="#1f77b4", linewidth=1.2)
-    ax1.set_title("Equity curve")
+    ax1.set_title(_t("資産推移", "Equity curve"))
     ax1.grid(alpha=0.3)
-    ax1.set_ylabel("Equity")
+    ax1.set_ylabel(_t("資産", "Equity"))
 
     ax2.fill_between(drawdown.index, drawdown.values, 0, color="#d62728", alpha=0.5)
-    ax2.set_title("Drawdown")
+    ax2.set_title(_t("ドローダウン", "Drawdown"))
     ax2.grid(alpha=0.3)
-    ax2.set_ylabel("DD")
+    ax2.set_ylabel(_t("DD", "DD"))
     ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0%}"))
 
     ax2.xaxis.set_major_locator(mdates.AutoDateLocator())
@@ -59,18 +100,18 @@ def _plot_price_signals(signals: pd.DataFrame, max_points: int = 4000) -> str:
         df = df.iloc[::stride]
 
     fig, ax = plt.subplots(figsize=(11, 4))
-    ax.plot(df.index, df["close"], color="#333", linewidth=0.8, label="close")
+    ax.plot(df.index, df["close"], color="#333", linewidth=0.8, label=_t("終値", "close"))
     if "sma_fast" in df:
-        ax.plot(df.index, df["sma_fast"], color="#2ca02c", linewidth=0.9, label="SMA fast")
+        ax.plot(df.index, df["sma_fast"], color="#2ca02c", linewidth=0.9, label=_t("短期 SMA", "SMA fast"))
     if "sma_slow" in df:
-        ax.plot(df.index, df["sma_slow"], color="#ff7f0e", linewidth=0.9, label="SMA slow")
+        ax.plot(df.index, df["sma_slow"], color="#ff7f0e", linewidth=0.9, label=_t("長期 SMA", "SMA slow"))
 
     longs = df[df["signal"] == 1]
     shorts = df[df["signal"] == -1]
-    ax.scatter(longs.index, longs["close"], marker="^", s=12, color="#2ca02c", alpha=0.5, label="long")
-    ax.scatter(shorts.index, shorts["close"], marker="v", s=12, color="#d62728", alpha=0.5, label="short")
+    ax.scatter(longs.index, longs["close"], marker="^", s=12, color="#2ca02c", alpha=0.5, label=_t("買い", "long"))
+    ax.scatter(shorts.index, shorts["close"], marker="v", s=12, color="#d62728", alpha=0.5, label=_t("売り", "short"))
 
-    ax.set_title("Price with signals")
+    ax.set_title(_t("価格とシグナル", "Price with signals"))
     ax.grid(alpha=0.3)
     ax.legend(loc="best", fontsize=8)
     ax.xaxis.set_major_locator(mdates.AutoDateLocator())
@@ -86,8 +127,8 @@ def _plot_trade_pnl(trades: pd.DataFrame) -> str | None:
     colors = ["#2ca02c" if v >= 0 else "#d62728" for v in trades["pnl"]]
     ax.bar(range(len(trades)), trades["pnl"], color=colors, width=0.9)
     ax.axhline(0, color="#333", linewidth=0.5)
-    ax.set_title("Per-trade PnL")
-    ax.set_xlabel("Trade #")
+    ax.set_title(_t("トレード別損益", "Per-trade PnL"))
+    ax.set_xlabel(_t("トレード番号", "Trade #"))
     ax.grid(alpha=0.3, axis="y")
     fig.tight_layout()
     return _fig_to_base64(fig)
@@ -96,14 +137,14 @@ def _plot_trade_pnl(trades: pd.DataFrame) -> str | None:
 def _metrics_table(perf: Performance) -> str:
     pf = f"{perf.profit_factor:.2f}" if np.isfinite(perf.profit_factor) else "∞"
     rows = [
-        ("Total return", f"{perf.total_return:.2%}"),
-        ("CAGR", f"{perf.cagr:.2%}"),
-        ("Sharpe", f"{perf.sharpe:.2f}"),
-        ("Max drawdown", f"{perf.max_drawdown:.2%}"),
-        ("Win rate", f"{perf.win_rate:.2%}"),
-        ("# trades", f"{perf.num_trades:d}"),
-        ("Profit factor", pf),
-        ("Avg trade PnL", f"{perf.avg_trade_pnl:,.2f}"),
+        ("総リターン", f"{perf.total_return:.2%}"),
+        ("年率リターン (CAGR)", f"{perf.cagr:.2%}"),
+        ("シャープレシオ", f"{perf.sharpe:.2f}"),
+        ("最大ドローダウン", f"{perf.max_drawdown:.2%}"),
+        ("勝率", f"{perf.win_rate:.2%}"),
+        ("トレード数", f"{perf.num_trades:d}"),
+        ("プロフィットファクター", pf),
+        ("平均トレード損益", f"{perf.avg_trade_pnl:,.2f}"),
     ]
     items = "".join(
         f"<tr><th>{html.escape(k)}</th><td>{html.escape(v)}</td></tr>" for k, v in rows
@@ -113,16 +154,16 @@ def _metrics_table(perf: Performance) -> str:
 
 def _params_table(params: StrategyParams, cfg: BacktestConfig, period: tuple) -> str:
     rows = [
-        ("Period start", str(period[0])),
-        ("Period end", str(period[1])),
-        ("Bars", str(period[2])),
-        ("SMA fast", str(params.fast)),
-        ("SMA slow", str(params.slow)),
-        ("RSI period", str(params.rsi_period)),
-        ("RSI upper / lower", f"{params.rsi_upper} / {params.rsi_lower}"),
-        ("Size", f"{cfg.size:,.0f}"),
-        ("Spread", f"{cfg.spread}"),
-        ("Initial equity", f"{cfg.initial_equity:,.0f}"),
+        ("期間開始", str(period[0])),
+        ("期間終了", str(period[1])),
+        ("本数", f"{period[2]:,}"),
+        ("短期 SMA", str(params.fast)),
+        ("長期 SMA", str(params.slow)),
+        ("RSI 期間", str(params.rsi_period)),
+        ("RSI 上限 / 下限", f"{params.rsi_upper} / {params.rsi_lower}"),
+        ("取引枚数", f"{cfg.size:,.0f}"),
+        ("スプレッド", f"{cfg.spread}"),
+        ("初期資金", f"{cfg.initial_equity:,.0f}"),
     ]
     items = "".join(
         f"<tr><th>{html.escape(k)}</th><td>{html.escape(v)}</td></tr>" for k, v in rows
@@ -130,27 +171,42 @@ def _params_table(params: StrategyParams, cfg: BacktestConfig, period: tuple) ->
     return f"<table class='kv'>{items}</table>"
 
 
+_TRADE_COL_JP = {
+    "entry_time": "エントリー時刻",
+    "exit_time": "決済時刻",
+    "side": "方向",
+    "entry_price": "エントリー価格",
+    "exit_price": "決済価格",
+    "pnl": "損益",
+}
+
+
 def _trades_table(trades: pd.DataFrame, limit: int = 50) -> str:
     if trades is None or len(trades) == 0:
-        return "<p><em>No trades.</em></p>"
+        return "<p><em>トレードはありません。</em></p>"
     shown = trades.head(limit).copy()
-    shown["side"] = shown["side"].map({1: "LONG", -1: "SHORT"}).fillna("")
+    shown["side"] = shown["side"].map({1: "買い", -1: "売り"}).fillna("")
     shown["entry_price"] = shown["entry_price"].map(lambda v: f"{v:.4f}")
     shown["exit_price"] = shown["exit_price"].map(lambda v: f"{v:.4f}")
     shown["pnl"] = shown["pnl"].map(lambda v: f"{v:,.2f}")
-    thead = "<tr>" + "".join(f"<th>{html.escape(c)}</th>" for c in shown.columns) + "</tr>"
+    headers = [_TRADE_COL_JP.get(c, c) for c in shown.columns]
+    thead = "<tr>" + "".join(f"<th>{html.escape(h)}</th>" for h in headers) + "</tr>"
     body = "".join(
         "<tr>" + "".join(f"<td>{html.escape(str(v))}</td>" for v in row) + "</tr>"
         for row in shown.itertuples(index=False)
     )
     extra = ""
     if len(trades) > limit:
-        extra = f"<p class='muted'>Showing first {limit} of {len(trades)} trades.</p>"
+        extra = (
+            f"<p class='muted'>先頭 {limit} 件 / 全 {len(trades):,} 件を表示しています。</p>"
+        )
     return f"<table class='trades'><thead>{thead}</thead><tbody>{body}</tbody></table>{extra}"
 
 
 _CSS = """
-body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+body { font-family: "Yu Gothic UI", "Yu Gothic", "Meiryo", "Hiragino Sans",
+       "Noto Sans CJK JP", -apple-system, BlinkMacSystemFont, "Segoe UI",
+       Roboto, Helvetica, Arial, sans-serif;
        color: #222; max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
 h1 { margin-bottom: 0.2rem; }
 .muted { color: #777; font-size: 0.9em; }
@@ -172,9 +228,9 @@ def render_html(
     perf: Performance,
     params: StrategyParams,
     cfg: BacktestConfig,
-    title: str = "FX Backtest Report",
+    title: str = "FX バックテストレポート",
 ) -> str:
-    """Return a fully self-contained HTML document as a string."""
+    """Return a fully self-contained Japanese HTML document as a string."""
     eq_b64 = _plot_equity_drawdown(result.equity)
     price_b64 = _plot_price_signals(result.signals)
     trade_b64 = _plot_trade_pnl(result.trades)
@@ -185,7 +241,7 @@ def render_html(
     trades_html = _trades_table(result.trades)
 
     trade_section = (
-        f"<section><h2>Per-trade PnL</h2><img alt='pnl' src='data:image/png;base64,{trade_b64}'></section>"
+        f"<section><h2>トレード別損益</h2><img alt='pnl' src='data:image/png;base64,{trade_b64}'></section>"
         if trade_b64
         else ""
     )
@@ -199,27 +255,27 @@ def render_html(
 </head>
 <body>
 <h1>{html.escape(title)}</h1>
-<p class="muted">Generated by fx.main — SMA crossover + RSI filter strategy</p>
+<p class="muted">fx.main による出力 — SMA クロス + RSI フィルタ戦略</p>
 
 <div class="grid">
-  <div><h2>Performance</h2>{metrics}</div>
-  <div><h2>Parameters</h2>{paramsT}</div>
+  <div><h2>パフォーマンス</h2>{metrics}</div>
+  <div><h2>パラメータ</h2>{paramsT}</div>
 </div>
 
 <section>
-  <h2>Equity & drawdown</h2>
+  <h2>資産推移とドローダウン</h2>
   <img alt="equity" src="data:image/png;base64,{eq_b64}">
 </section>
 
 <section>
-  <h2>Price & signals</h2>
+  <h2>価格とシグナル</h2>
   <img alt="price" src="data:image/png;base64,{price_b64}">
 </section>
 
 {trade_section}
 
 <section>
-  <h2>Trades</h2>
+  <h2>トレード一覧</h2>
   {trades_html}
 </section>
 
@@ -235,7 +291,7 @@ def write_html(
     perf: Performance,
     params: StrategyParams,
     cfg: BacktestConfig,
-    title: str = "FX Backtest Report",
+    title: str = "FX バックテストレポート",
 ) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

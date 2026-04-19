@@ -59,7 +59,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=True,
         help="Open the HTML report in a browser after writing (default: on). Use --no-open to disable.",
     )
-    p.add_argument("--title", default="FX Backtest Report", help="Title in the HTML report")
+    p.add_argument("--title", default="FX バックテストレポート", help="Title in the HTML report")
     return p
 
 

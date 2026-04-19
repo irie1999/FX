@@ -26,13 +26,13 @@ def test_render_html_returns_valid_document():
     doc = render_html(result, perf, params, cfg, title="Unit Test Run")
     assert doc.startswith("<!doctype html>")
     assert "Unit Test Run" in doc
-    assert "Performance" in doc
-    assert "Parameters" in doc
+    assert "パフォーマンス" in doc
+    assert "パラメータ" in doc
     # Embedded images are base64 PNGs
     assert "data:image/png;base64," in doc
     # Metrics show up
-    assert "Total return" in doc
-    assert "Sharpe" in doc
+    assert "総リターン" in doc
+    assert "シャープレシオ" in doc
 
 
 def test_write_html_creates_file(tmp_path):
@@ -55,4 +55,4 @@ def test_report_handles_no_trades(tmp_path):
     result = run_backtest(signals, cfg)
     perf = compute_performance(result.equity, result.returns, result.trades, cfg.initial_equity)
     doc = render_html(result, perf, params, cfg)
-    assert "No trades" in doc
+    assert "トレードはありません" in doc
