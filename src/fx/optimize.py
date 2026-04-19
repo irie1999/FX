@@ -23,12 +23,14 @@ class Combo:
     rsi_upper: float
     rsi_lower: float
     stop_atr: float | None   # None = stops disabled
+    adx_threshold: float = 0.0   # 0 = disabled
 
     def describe(self) -> str:
         stop = f"{self.stop_atr:.2f}×ATR" if self.stop_atr is not None else "off"
+        adx_bit = f" adx>{self.adx_threshold:.0f}" if self.adx_threshold > 0 else ""
         return (
             f"fast={self.fast} slow={self.slow} rsi={self.rsi_period} "
-            f"U/L={self.rsi_upper:.0f}/{self.rsi_lower:.0f} stop={stop}"
+            f"U/L={self.rsi_upper:.0f}/{self.rsi_lower:.0f} stop={stop}{adx_bit}"
         )
 
 
@@ -51,17 +53,25 @@ def generate_combos(
     rsi_upper: list[float],
     rsi_lower: list[float],
     stop_atr: list[float | None],
+    adx_threshold: list[float] | None = None,
 ) -> list[Combo]:
+    if adx_threshold is None:
+        adx_threshold = [0.0]
     combos: list[Combo] = []
-    for f, s, rp, ru, rl, sa in itertools.product(
-        fast, slow, rsi_period, rsi_upper, rsi_lower, stop_atr
+    for f, s, rp, ru, rl, sa, at in itertools.product(
+        fast, slow, rsi_period, rsi_upper, rsi_lower, stop_atr, adx_threshold
     ):
         if f >= s:
             continue                 # Require fast < slow
         if rl >= ru:
             continue                 # Require lower < upper
         combos.append(
-            Combo(fast=f, slow=s, rsi_period=rp, rsi_upper=ru, rsi_lower=rl, stop_atr=sa)
+            Combo(
+                fast=f, slow=s, rsi_period=rp,
+                rsi_upper=ru, rsi_lower=rl,
+                stop_atr=sa,
+                adx_threshold=at,
+            )
         )
     return combos
 
@@ -74,6 +84,7 @@ def run_combo(df: pd.DataFrame, combo: Combo, cfg: BacktestConfig):
         rsi_period=combo.rsi_period,
         rsi_upper=combo.rsi_upper,
         rsi_lower=combo.rsi_lower,
+        adx_threshold=combo.adx_threshold,
     )
     signals = generate_signals(df, params)
     stops = StopConfig(
@@ -98,6 +109,7 @@ def combo_row(combo: Combo, perf, extra: dict | None = None) -> dict:
         "rsi_upper": combo.rsi_upper,
         "rsi_lower": combo.rsi_lower,
         "stop_atr": combo.stop_atr if combo.stop_atr is not None else float("nan"),
+        "adx_threshold": combo.adx_threshold,
         "num_trades": perf.num_trades,
         "win_rate": perf.win_rate,
         "pf": perf.profit_factor,

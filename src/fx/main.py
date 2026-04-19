@@ -49,6 +49,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rsi", type=int, default=14)
     p.add_argument("--rsi-upper", type=float, default=70.0)
     p.add_argument("--rsi-lower", type=float, default=30.0)
+    p.add_argument("--adx-period", type=int, default=14)
+    p.add_argument(
+        "--adx-threshold", type=float, default=0.0,
+        help="Only enter when ADX > threshold (trend-strength filter). 0 = disabled.",
+    )
 
     p.add_argument("--size", type=float, default=10_000.0, help="Units per trade")
     p.add_argument("--spread", type=float, default=0.02, help="Spread in price units")
@@ -79,6 +84,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Open the HTML report in a browser after writing (default: on). Use --no-open to disable.",
     )
     p.add_argument("--title", default="FX バックテストレポート", help="Title in the HTML report")
+    p.add_argument(
+        "--currency", default="¥",
+        help="Currency symbol shown in the HTML (default ¥). Use '$' for EURUSD etc.",
+    )
     return p
 
 
@@ -109,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
         rsi_period=args.rsi,
         rsi_upper=args.rsi_upper,
         rsi_lower=args.rsi_lower,
+        adx_period=args.adx_period,
+        adx_threshold=args.adx_threshold,
     )
     signals = generate_signals(df, params)
 
@@ -141,7 +152,10 @@ def main(argv: list[str] | None = None) -> int:
         # Lazy import so matplotlib isn't required unless the user wants HTML.
         from .report import write_html
 
-        out = write_html(args.html, result, perf, params, cfg, title=args.title, stops=stops)
+        out = write_html(
+            args.html, result, perf, params, cfg,
+            title=args.title, stops=stops, currency=args.currency,
+        )
         print(f"HTML report: {out.resolve()}")
         if args.open:
             import webbrowser

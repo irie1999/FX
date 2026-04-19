@@ -174,8 +174,18 @@ def _plot_trade_pnl(trades: pd.DataFrame) -> str | None:
     return _fig_to_base64(fig)
 
 
+# Mutable default; override with set_currency_symbol() or render_html(currency=...)
+_CURRENCY = "¥"
+
+
+def set_currency_symbol(sym: str) -> None:
+    global _CURRENCY
+    _CURRENCY = sym
+
+
 def _fmt_yen(v: float) -> str:
-    return f"¥{v:,.0f}"
+    """Format as a currency value using the configured symbol."""
+    return f"{_CURRENCY}{v:,.0f}"
 
 
 def _summary_table(perf: Performance) -> str:
@@ -355,8 +365,11 @@ def render_html(
     cfg: BacktestConfig,
     title: str = "FX バックテストレポート",
     stops: StopConfig | None = None,
+    currency: str | None = None,
 ) -> str:
     """Return a fully self-contained Japanese HTML document as a string."""
+    if currency is not None:
+        set_currency_symbol(currency)
     eq_b64 = _plot_equity_drawdown(result.equity)
     price_b64 = _plot_price_signals(result.signals)
     trade_b64 = _plot_trade_pnl(result.trades)
@@ -432,8 +445,12 @@ def write_html(
     cfg: BacktestConfig,
     title: str = "FX バックテストレポート",
     stops: StopConfig | None = None,
+    currency: str | None = None,
 ) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_html(result, perf, params, cfg, title, stops=stops), encoding="utf-8")
+    path.write_text(
+        render_html(result, perf, params, cfg, title, stops=stops, currency=currency),
+        encoding="utf-8",
+    )
     return path

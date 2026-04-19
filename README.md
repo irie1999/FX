@@ -76,6 +76,7 @@ python tools/grid_search.py --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" \
     --fast 10,15,20,30 --slow 30,50,75,100 \
     --rsi-period 10,14,21 \
     --stop-atr none,1.0,1.25,1.5,2.0 \
+    --adx-threshold 0,20,25,30 \
     --top 30 --sort-by pf \
     --html results/grid.html --csv-out results/grid.csv
 ```
@@ -138,6 +139,9 @@ python -m fx.main --synthetic --html --no-open
 - `--rsi` RSI 期間 (default 14)
 - `--rsi-upper` / `--rsi-lower` RSI フィルタの閾値
 - `--stop-atr N` ATR ベースのストップロス (N × ATR 距離で自動決済)
+- `--adx-threshold N` ADX > N の時だけエントリー (トレンド強度フィルタ、0 = 無効)
+- `--adx-period N` ADX 算出期間 (default 14)
+- `--currency SYM` HTML に表示する通貨記号 (default ¥、EURUSD 等は `$` 推奨)
 - `--spread` スプレッド (price units)
 - `--size` 1 トレードの枚数
 - `--start YYYY-MM-DD` / `--end YYYY-MM-DD` バックテスト期間の絞り込み

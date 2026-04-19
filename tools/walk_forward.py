@@ -137,6 +137,7 @@ def run_walk_forward(
             rsi_upper=float(best["rsi_upper"]),
             rsi_lower=float(best["rsi_lower"]),
             stop_atr=None if pd.isna(best["stop_atr"]) else float(best["stop_atr"]),
+            adx_threshold=float(best.get("adx_threshold", 0.0) or 0.0),
         )
 
         # Out-of-sample run on test slice
@@ -446,6 +447,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rsi-upper", default="70")
     p.add_argument("--rsi-lower", default="30")
     p.add_argument("--stop-atr", default="1.0,1.25,1.5,2.0")
+    p.add_argument("--adx-threshold", default="0",
+                   help="Comma-separated ADX thresholds (0 = disabled). e.g. 0,20,25")
 
     p.add_argument("--size", type=float, default=10_000.0)
     p.add_argument("--spread", type=float, default=0.02)
@@ -492,6 +495,7 @@ def main(argv: list[str] | None = None) -> int:
         rsi_upper=parse_param_list(args.rsi_upper, float),
         rsi_lower=parse_param_list(args.rsi_lower, float),
         stop_atr=parse_param_list(args.stop_atr, float),
+        adx_threshold=parse_param_list(args.adx_threshold, float),
     )
     if not combos:
         print("No valid combinations.", file=sys.stderr)
