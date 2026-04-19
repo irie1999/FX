@@ -99,6 +99,8 @@ python -m fx.main --synthetic --html --no-open
 - `--stop-atr N` ATR ベースのストップロス (N × ATR 距離で自動決済)
 - `--spread` スプレッド (price units)
 - `--size` 1 トレードの枚数
+- `--start YYYY-MM-DD` / `--end YYYY-MM-DD` バックテスト期間の絞り込み
+  例: `--start 2024-01-01 --end 2024-12-31` で 2024 年のみ検証
 
 ## テスト
 

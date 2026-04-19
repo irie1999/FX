@@ -31,6 +31,16 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Resample loaded data to this pandas rule (e.g. '5min','1h','1d'). Useful for M1 sources.",
     )
+    p.add_argument(
+        "--start",
+        default=None,
+        help="Keep bars with timestamp >= START (inclusive). Format: YYYY-MM-DD or ISO 8601.",
+    )
+    p.add_argument(
+        "--end",
+        default=None,
+        help="Keep bars with timestamp <= END (inclusive). Format: YYYY-MM-DD or ISO 8601.",
+    )
     p.add_argument("--bars", type=int, default=5000, help="Synthetic bars (default 5000)")
     p.add_argument("--seed", type=int, default=42, help="Synthetic data seed")
 
@@ -84,6 +94,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.resample:
         df = data_mod.resample_ohlc(df, args.resample)
+
+    # Slice by date range (after resample so boundaries match aggregated bars)
+    if args.start or args.end:
+        df = data_mod.slice_period(df, args.start, args.end)
+
+    if len(df) == 0:
+        print("No bars after applying --start/--end filter.")
+        return 1
 
     params = StrategyParams(
         fast=args.fast,

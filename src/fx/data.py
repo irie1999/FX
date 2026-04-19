@@ -88,6 +88,37 @@ def load_histdata(
     return merged[list(REQUIRED_COLS)].astype(float)
 
 
+def slice_period(
+    df: pd.DataFrame,
+    start: str | pd.Timestamp | None,
+    end: str | pd.Timestamp | None,
+) -> pd.DataFrame:
+    """Return bars with timestamps within [start, end] inclusive.
+
+    Accepts YYYY-MM-DD or full ISO 8601 strings. A naive datetime is
+    assumed to be UTC so it matches the index timezone used elsewhere.
+    """
+    if df.index.tz is None:
+        idx = df.index
+    else:
+        idx = df.index
+
+    def _parse(v) -> pd.Timestamp | None:
+        if v is None:
+            return None
+        ts = pd.to_datetime(v, utc=True, errors="raise")
+        return ts
+
+    s = _parse(start)
+    e = _parse(end)
+    mask = pd.Series(True, index=df.index)
+    if s is not None:
+        mask &= df.index >= s
+    if e is not None:
+        mask &= df.index <= e
+    return df.loc[mask]
+
+
 def resample_ohlc(df: pd.DataFrame, rule: str) -> pd.DataFrame:
     """Resample OHLC data to a coarser frequency (e.g. '5min', '1h', '1d')."""
     out = df.resample(rule).agg(
