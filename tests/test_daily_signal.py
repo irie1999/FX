@@ -54,6 +54,24 @@ def test_build_report_flat_signal():
     assert "ノーポジション" in text
 
 
+def test_build_report_shows_jst_and_next_bar():
+    st = _mk_status(0, 0)
+    text = ds.build_report(st, "HOLD_FLAT", "USD/JPY", 1000, resample="1d")
+    # Times should be rendered in JST
+    assert "JST" in text
+    # Next bar close line should appear
+    assert "次バー締め" in text
+
+
+def test_build_report_respects_intraday_resample():
+    st = _mk_status(0, 1, stop_level=156.50)
+    text = ds.build_report(st, "ENTER_LONG", "USD/JPY", 1000, resample="4h")
+    # We don't assert exact next-close value (depends on clock), only that
+    # a JST timestamp and "次バー締め" are present
+    assert "JST" in text
+    assert "次バー締め" in text
+
+
 def test_build_report_new_long_includes_sbi_steps():
     st = _mk_status(0, 1, stop_level=156.50)
     text = ds.build_report(st, "ENTER_LONG", "USD/JPY", 1000)

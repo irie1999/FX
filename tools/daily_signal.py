@@ -31,7 +31,7 @@ import sys
 import urllib.error
 import urllib.request
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,6 +78,35 @@ def _fmt_money(v: float, currency: str = "¥") -> str:
     return f"{currency}{v:+,.0f}"
 
 
+JST = timezone(timedelta(hours=9))
+
+
+_RESAMPLE_HOURS = {
+    "1min": 1/60, "5min": 5/60, "15min": 0.25, "30min": 0.5,
+    "1h": 1.0, "4h": 4.0, "1d": 24.0, "d": 24.0,
+}
+
+
+def _next_close(last_bar, resample: str):
+    """Estimate the next bar close from the last completed bar.
+
+    Maps common resample rules to a Timedelta; falls back to 1d for
+    anything unfamiliar. We avoid pandas offset arithmetic because
+    different pandas versions disagree on which case ('d' vs 'D') is
+    valid.
+    """
+    import pandas as pd
+
+    hours = _RESAMPLE_HOURS.get(resample.lower(), 24.0)
+    return pd.Timestamp(last_bar) + pd.Timedelta(hours=hours)
+
+
+def _hours_until(ts) -> float:
+    import pandas as pd
+    now = pd.Timestamp.now(tz="UTC")
+    return max(0.0, (pd.Timestamp(ts) - now).total_seconds() / 3600.0)
+
+
 def _format_sbi_instructions(action: str, instrument: str, size: int,
                              stop_level: float | None) -> list[str]:
     """SBI-flavored step-by-step instructions in Japanese."""
@@ -109,14 +138,35 @@ def build_report(
     instrument: str,
     size: int,
     currency: str = "¥",
+    resample: str = "1d",
 ) -> str:
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now_jst = datetime.now(JST).strftime("%Y-%m-%d %H:%M JST")
     lines: list[str] = []
     lines.append("=" * 60)
-    lines.append(f" 📅 FX 取引シグナル — 作成: {now}")
+    lines.append(f" 📅 FX 取引シグナル — 作成: {now_jst}")
     lines.append("=" * 60)
     lines.append(f" 通貨ペア      : {instrument}")
-    lines.append(f" データ最終    : {status.last_bar}")
+    last_jst = status.last_bar.tz_convert(JST)
+    lines.append(f" データ最終    : {last_jst.strftime('%Y-%m-%d %H:%M JST')}")
+
+    # Next bar close info — so the user knows when to place orders.
+    try:
+        import pandas as pd
+        next_close = _next_close(status.last_bar, resample)
+        hours_remaining = _hours_until(next_close)
+        next_close_jst = next_close.tz_convert(JST)
+        if hours_remaining > 0:
+            lines.append(
+                f" 次バー締め    : {next_close_jst.strftime('%Y-%m-%d %H:%M JST')} "
+                f"(あと {hours_remaining:.1f} h)"
+            )
+        else:
+            lines.append(
+                f" 次バー締め    : {next_close_jst.strftime('%Y-%m-%d %H:%M JST')} (既に経過、データ更新待ち)"
+            )
+    except Exception:
+        pass
+
     lines.append(f" 現在値        : {status.current_price:.4f}")
 
     pos_label = {1: "ロング", -1: "ショート", 0: "ノーポジション"}[status.position]
@@ -254,7 +304,8 @@ def generate_signal_payload(args) -> dict:
     action = classify_action(status.position, status.next_signal)
 
     report_text = build_report(
-        status, action, args.instrument, args.size, currency=args.currency
+        status, action, args.instrument, args.size,
+        currency=args.currency, resample=args.resample,
     )
 
     payload = {

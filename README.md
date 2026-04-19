@@ -165,20 +165,38 @@ python tools/daily_signal.py \
     --webhook "https://discord.com/api/webhooks/xxxxxx/yyyyyy"
 ```
 
-### Windows Task Scheduler で毎朝自動実行
+### 夜間実行のタイミング（推奨: 22:30 JST）
+
+FX 日足は NY クローズ (21:00〜22:00 UTC = JST 翌朝 06:00〜07:00) で締まります。**夜 22:30 JST に実行する場合**のタイムライン:
+
+```
+  ← 過去の日足バー (最終)
+  |=======================|-----今日はここ----|=======================|
+  06:00 JST (今朝)        22:30 JST (実行!)    06:00 JST (明朝, 次バー締め)
+                          あと 7.5h で次バー締める
+```
+
+- 実行時点の**最新確定バー = 今朝 06:00 JST に締まった分**
+- シグナルは「**次の日足バー** (今夜〜明朝の値動き) でのポジション希望」を表す
+- NY 市場が開いた直後で流動性が高い → **このまま SBI アプリで発注**して就寝、明朝の値動きは自動で反映
+- ストップ注文は GTC (Good Till Cancelled) で置いておけば、寝ている間に逆行しても自動決済
+
+### Windows Task Scheduler で夜間自動実行
 
 1. データ更新: 月初に `python tools/fetch_histdata.py --pair USDJPY --months YYYY-MM` を走らせるタスク
-2. シグナル生成: 平日 07:05 (JST) に上記コマンドを走らせるタスク
-3. Webhook 通知で携帯に届く → SBI アプリで発注
+2. シグナル生成: 平日 22:30 (JST) に上記コマンドを走らせるタスク
+3. Webhook 通知で携帯に届く → そのまま SBI アプリで発注して就寝
 
-タスク作成例 (PowerShell):
+タスク作成例 (PowerShell、夜 22:30 JST 実行):
 ```powershell
 $action = New-ScheduledTaskAction -Execute "python" `
     -Argument "tools\daily_signal.py --histdata data\raw\DAT_ASCII_USDJPY_M1_*.csv --resample 1d --strategy adaptive --size 1000 --stop-atr 1.25 --webhook YOUR_URL" `
     -WorkingDirectory (Get-Location)
-$trigger = New-ScheduledTaskTrigger -Daily -At 7:05am
-Register-ScheduledTask -TaskName "FX Daily Signal" -Action $action -Trigger $trigger
+$trigger = New-ScheduledTaskTrigger -Daily -At 10:30pm
+Register-ScheduledTask -TaskName "FX Nightly Signal" -Action $action -Trigger $trigger
 ```
+
+朝に実行したい場合は `-At 7:05am` に変更するだけ。出力自体は実行時刻に依存しません。
 
 ## デイトレ (ライブ / ペーパー)
 
