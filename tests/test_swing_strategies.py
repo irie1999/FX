@@ -113,10 +113,10 @@ def test_ichimoku_requires_high_low_close():
 
 # ----------------------------------------------------- Registry
 
-def test_registry_contains_all_seven():
+def test_registry_contains_all_strategies():
     assert set(strategies.names()) == {
         "sma_rsi", "orb", "bollinger", "donchian",
-        "macd", "supertrend", "ichimoku",
+        "macd", "supertrend", "ichimoku", "adaptive",
     }
 
 
