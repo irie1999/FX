@@ -8,6 +8,7 @@ from pathlib import Path
 from . import data as data_mod
 from .backtest import BacktestConfig, StopConfig, run_backtest
 from .metrics import compute_performance, format_performance
+from .status import compute_current_status, format_status_console
 from .strategy import StrategyParams, generate_signals
 
 
@@ -143,6 +144,10 @@ def main(argv: list[str] | None = None) -> int:
     print("-" * 40)
     print(format_performance(perf))
 
+    status = compute_current_status(result, cfg, stops)
+    print()
+    print(format_status_console(status, currency=args.currency))
+
     if args.save_equity:
         result.equity.to_csv(args.save_equity, header=["equity"])
     if args.save_trades:
@@ -155,6 +160,7 @@ def main(argv: list[str] | None = None) -> int:
         out = write_html(
             args.html, result, perf, params, cfg,
             title=args.title, stops=stops, currency=args.currency,
+            status=status,
         )
         print(f"HTML report: {out.resolve()}")
         if args.open:

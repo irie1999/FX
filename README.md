@@ -142,6 +142,11 @@ python -m fx.main --synthetic --html --no-open
 - `--adx-threshold N` ADX > N の時だけエントリー (トレンド強度フィルタ、0 = 無効)
 - `--adx-period N` ADX 算出期間 (default 14)
 - `--currency SYM` HTML に表示する通貨記号 (default ¥、EURUSD 等は `$` 推奨)
+
+バックテスト実行後、コンソール末尾と HTML 冒頭に **現在の状態 / 翌バーのアクション** が表示されます。
+- 現在のポジション（ロング / ショート / フラット）
+- 含み損益・エントリー日時・ストップ水準
+- 翌バーのシグナルと具体的な発注指示 (「新規ロング」「ショートへドテン」等)
 - `--spread` スプレッド (price units)
 - `--size` 1 トレードの枚数
 - `--start YYYY-MM-DD` / `--end YYYY-MM-DD` バックテスト期間の絞り込み

@@ -18,6 +18,7 @@ import pandas as pd  # noqa: E402
 
 from .backtest import BacktestConfig, BacktestResult, StopConfig  # noqa: E402
 from .metrics import Performance, monthly_pnl  # noqa: E402
+from .status import CurrentStatus, render_status_html  # noqa: E402
 from .strategy import StrategyParams  # noqa: E402
 
 
@@ -366,10 +367,12 @@ def render_html(
     title: str = "FX バックテストレポート",
     stops: StopConfig | None = None,
     currency: str | None = None,
+    status: CurrentStatus | None = None,
 ) -> str:
     """Return a fully self-contained Japanese HTML document as a string."""
     if currency is not None:
         set_currency_symbol(currency)
+    status_html = render_status_html(status, _CURRENCY) if status is not None else ""
     eq_b64 = _plot_equity_drawdown(result.equity)
     price_b64 = _plot_price_signals(result.signals)
     trade_b64 = _plot_trade_pnl(result.trades)
@@ -398,6 +401,8 @@ def render_html(
 <body>
 <h1>{html.escape(title)}</h1>
 <p class="muted">fx.main による出力 — SMA クロス + RSI フィルタ戦略</p>
+
+{f'<section><h2>現在の状態 / 次のアクション</h2>{status_html}</section>' if status_html else ''}
 
 <section class="summary">
   <h2>損益サマリー</h2>
@@ -446,11 +451,15 @@ def write_html(
     title: str = "FX バックテストレポート",
     stops: StopConfig | None = None,
     currency: str | None = None,
+    status: CurrentStatus | None = None,
 ) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        render_html(result, perf, params, cfg, title, stops=stops, currency=currency),
+        render_html(
+            result, perf, params, cfg, title,
+            stops=stops, currency=currency, status=status,
+        ),
         encoding="utf-8",
     )
     return path
