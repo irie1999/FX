@@ -5,8 +5,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import pandas as pd
+
 from . import data as data_mod
-from .backtest import BacktestConfig, StopConfig, run_backtest
+from . import strategies as strategies_pkg
+from .backtest import BacktestConfig, BacktestResult, StopConfig, run_backtest
 from .metrics import compute_performance, format_performance
 from .status import compute_current_status, format_status_console
 from .strategy import StrategyParams, generate_signals
@@ -44,6 +47,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--bars", type=int, default=5000, help="Synthetic bars (default 5000)")
     p.add_argument("--seed", type=int, default=42, help="Synthetic data seed")
+
+    p.add_argument(
+        "--strategy",
+        default="sma_rsi",
+        choices=strategies_pkg.names(),
+        help="Strategy to run (default: sma_rsi). --fast/--slow/--rsi only apply to sma_rsi.",
+    )
+    p.add_argument(
+        "--eval-days",
+        type=int,
+        default=None,
+        help="Only evaluate performance on the last N days (the strategy still "
+             "warms up on all prior data). Useful for checking recent behavior.",
+    )
 
     p.add_argument("--fast", type=int, default=20)
     p.add_argument("--slow", type=int, default=50)
@@ -113,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         print("No bars after applying --start/--end filter.")
         return 1
 
+    # Keep StrategyParams for HTML/backcompat; only sma_rsi actually honors them.
     params = StrategyParams(
         fast=args.fast,
         slow=args.slow,
@@ -122,11 +140,48 @@ def main(argv: list[str] | None = None) -> int:
         adx_period=args.adx_period,
         adx_threshold=args.adx_threshold,
     )
-    signals = generate_signals(df, params)
+
+    if args.strategy == "sma_rsi":
+        signals = generate_signals(df, params)
+        strategy_display = "SMA クロス + RSI"
+    else:
+        strat_mod = strategies_pkg.get(args.strategy)
+        signals = strat_mod.generate(df)
+        strategy_display = strat_mod.DISPLAY
 
     cfg = BacktestConfig(size=args.size, spread=args.spread, initial_equity=args.equity)
     stops = StopConfig(enabled=args.stop_atr is not None, atr_mult=args.stop_atr or 0.0)
     result = run_backtest(signals, cfg, stops=stops)
+
+    # Optionally restrict evaluation to the last N days. The strategy already
+    # consumed its full warmup above, so slicing here just hides earlier bars
+    # from metrics / report / HTML.
+    if args.eval_days is not None:
+        end = result.equity.index[-1]
+        start = end - pd.Timedelta(days=args.eval_days)
+        mask = result.equity.index >= start
+        if not mask.any():
+            print(f"No bars within the last {args.eval_days} days.")
+            return 1
+
+        eq_slice = result.equity[mask]
+        start_eq = float(eq_slice.iloc[0])
+        adjusted_equity = cfg.initial_equity + (eq_slice - start_eq)
+        sliced_returns = result.returns[mask]
+        sliced_position = result.position[mask]
+        sliced_signals = result.signals.loc[eq_slice.index]
+        if len(result.trades) > 0 and "exit_time" in result.trades.columns:
+            sliced_trades = result.trades[result.trades["exit_time"] >= start].reset_index(drop=True)
+        else:
+            sliced_trades = result.trades
+
+        result = BacktestResult(
+            equity=adjusted_equity,
+            returns=sliced_returns,
+            position=sliced_position,
+            trades=sliced_trades,
+            signals=sliced_signals,
+        )
 
     perf = compute_performance(
         result.equity,
@@ -136,9 +191,11 @@ def main(argv: list[str] | None = None) -> int:
         position=result.position,
     )
 
-    print(f"Bars       : {len(df)}")
-    print(f"Period     : {df.index[0]} -> {df.index[-1]}")
-    print(f"Params     : fast={params.fast} slow={params.slow} rsi={params.rsi_period}")
+    print(f"Bars       : {len(result.equity)}" + (f"  (last {args.eval_days}d)" if args.eval_days else ""))
+    print(f"Period     : {result.equity.index[0]} -> {result.equity.index[-1]}")
+    print(f"Strategy   : {strategy_display}")
+    if args.strategy == "sma_rsi":
+        print(f"Params     : fast={params.fast} slow={params.slow} rsi={params.rsi_period}")
     stop_txt = f"{stops.atr_mult}*ATR" if stops.enabled else "off"
     print(f"Spread     : {cfg.spread}  Size: {cfg.size}  Equity0: {cfg.initial_equity:.0f}  Stop: {stop_txt}")
     print("-" * 40)
