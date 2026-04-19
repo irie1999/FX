@@ -9,24 +9,18 @@ Usage:
         --stop-atr none,1.0,1.25,1.5,2.0 \\
         --top 30 --sort-by pf --html results/grid.html
 
-Reuses the existing data loader, strategy, backtest and metrics modules.
-Runs are serialized (single-process) — the backtester is vectorized, so a
-grid of a few hundred combinations completes in seconds on a laptop.
+Core sweep logic lives in ``fx.optimize``; this file is just the CLI.
 """
 
 from __future__ import annotations
 
 import argparse
 import html as html_lib
-import itertools
 import math
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
-# Make `fx.*` importable whether run from repo root or anywhere else.
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
@@ -35,117 +29,16 @@ if str(SRC) not in sys.path:
 import pandas as pd  # noqa: E402
 
 from fx import data as data_mod  # noqa: E402
-from fx.backtest import BacktestConfig, StopConfig, run_backtest  # noqa: E402
-from fx.metrics import compute_performance  # noqa: E402
-from fx.strategy import StrategyParams, generate_signals  # noqa: E402
+from fx.backtest import BacktestConfig  # noqa: E402
+from fx.optimize import (  # noqa: E402
+    SORT_COLUMNS,
+    generate_combos,
+    grid_search,
+    parse_param_list,
+)
 
 
-SORT_CHOICES = ("pf", "sharpe", "cagr", "mar", "net_profit")
-
-
-@dataclass(frozen=True)
-class Combo:
-    fast: int
-    slow: int
-    rsi_period: int
-    rsi_upper: float
-    rsi_lower: float
-    stop_atr: float | None   # None = stops disabled
-
-
-def _parse_list(raw: str, cast):
-    items = [s.strip() for s in raw.split(",") if s.strip()]
-    out = []
-    for s in items:
-        if s.lower() in ("none", "off", "-"):
-            out.append(None)
-        else:
-            out.append(cast(s))
-    return out
-
-
-def generate_combos(
-    fast: list[int],
-    slow: list[int],
-    rsi_period: list[int],
-    rsi_upper: list[float],
-    rsi_lower: list[float],
-    stop_atr: list[float | None],
-) -> list[Combo]:
-    combos: list[Combo] = []
-    for f, s, rp, ru, rl, sa in itertools.product(
-        fast, slow, rsi_period, rsi_upper, rsi_lower, stop_atr
-    ):
-        if f >= s:
-            continue                 # Require fast < slow
-        if rl >= ru:
-            continue                 # Require lower < upper
-        combos.append(
-            Combo(fast=f, slow=s, rsi_period=rp, rsi_upper=ru, rsi_lower=rl, stop_atr=sa)
-        )
-    return combos
-
-
-def _run_one(df: pd.DataFrame, combo: Combo, cfg: BacktestConfig) -> dict:
-    params = StrategyParams(
-        fast=combo.fast,
-        slow=combo.slow,
-        rsi_period=combo.rsi_period,
-        rsi_upper=combo.rsi_upper,
-        rsi_lower=combo.rsi_lower,
-    )
-    signals = generate_signals(df, params)
-    stops = StopConfig(
-        enabled=combo.stop_atr is not None,
-        atr_mult=combo.stop_atr or 0.0,
-    )
-    result = run_backtest(signals, cfg, stops=stops)
-    perf = compute_performance(
-        result.equity,
-        result.returns,
-        result.trades,
-        cfg.initial_equity,
-        position=result.position,
-    )
-    pf = perf.profit_factor
-    mar = perf.cagr / abs(perf.max_drawdown) if perf.max_drawdown < 0 else float("inf")
-    return {
-        "fast": combo.fast,
-        "slow": combo.slow,
-        "rsi": combo.rsi_period,
-        "rsi_upper": combo.rsi_upper,
-        "rsi_lower": combo.rsi_lower,
-        "stop_atr": combo.stop_atr if combo.stop_atr is not None else float("nan"),
-        "num_trades": perf.num_trades,
-        "win_rate": perf.win_rate,
-        "pf": pf,
-        "sharpe": perf.sharpe,
-        "cagr": perf.cagr,
-        "total_return": perf.total_return,
-        "max_dd": perf.max_drawdown,
-        "mar": mar,
-        "net_profit": perf.net_profit,
-        "rr": perf.risk_reward,
-        "best": perf.best_trade,
-        "worst": perf.worst_trade,
-    }
-
-
-def grid_search(df: pd.DataFrame, combos: Iterable[Combo], cfg: BacktestConfig) -> pd.DataFrame:
-    rows: list[dict] = []
-    combos = list(combos)
-    start = time.time()
-    for i, combo in enumerate(combos, 1):
-        try:
-            rows.append(_run_one(df, combo, cfg))
-        except Exception as exc:   # one bad combo shouldn't kill the sweep
-            print(f"[warn] combo {combo} failed: {exc}", file=sys.stderr)
-        if i % 20 == 0 or i == len(combos):
-            elapsed = time.time() - start
-            rate = i / max(elapsed, 1e-9)
-            eta = (len(combos) - i) / max(rate, 1e-9)
-            print(f"  {i:>5}/{len(combos)}  ({rate:.1f}/s, ETA {eta:.1f}s)", file=sys.stderr)
-    return pd.DataFrame(rows)
+SORT_CHOICES = tuple(SORT_COLUMNS.keys())
 
 
 # ---------------------------------------------------------------- HTML output
@@ -174,8 +67,7 @@ tbody tr:hover { background: var(--panel-2); }
 td.pos { color: var(--pos); font-weight: 500; }
 td.neg { color: var(--neg); font-weight: 500; }
 tr.best td { background: rgba(88,166,255,0.1); }
-.summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem;
-           margin: 1rem 0; }
+.summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin: 1rem 0; }
 .card { background: var(--panel); border: 1px solid var(--border);
         border-radius: 6px; padding: 0.8rem 1rem; }
 .card .label { color: var(--muted); font-size: 0.85em; }
@@ -215,19 +107,17 @@ def _fmt_yen(v):
 
 def _cell(v, fmt, positive_good=True):
     txt = fmt(v)
-    if isinstance(v, (int, float)) and not math.isnan(v) if isinstance(v, float) else True:
-        cls = ""
-        if isinstance(v, (int, float)):
-            if positive_good and v > 0:
-                cls = "pos"
-            elif positive_good and v < 0:
-                cls = "neg"
-            elif not positive_good and v < 0:
-                cls = "pos"   # negative is good (e.g. drawdown)
-            elif not positive_good and v > 0:
-                cls = "neg"
-        return f"<td class='{cls}'>{html_lib.escape(str(txt))}</td>"
-    return f"<td>{html_lib.escape(str(txt))}</td>"
+    cls = ""
+    if isinstance(v, (int, float)) and not (isinstance(v, float) and math.isnan(v)):
+        if positive_good and v > 0:
+            cls = "pos"
+        elif positive_good and v < 0:
+            cls = "neg"
+        elif not positive_good and v < 0:
+            cls = "pos"
+        elif not positive_good and v > 0:
+            cls = "neg"
+    return f"<td class='{cls}'>{html_lib.escape(str(txt))}</td>"
 
 
 def render_html(
@@ -239,17 +129,8 @@ def render_html(
 ) -> str:
     if len(results) == 0:
         return "<html><body>No results.</body></html>"
-
-    sort_col = {
-        "pf": "pf",
-        "sharpe": "sharpe",
-        "cagr": "cagr",
-        "mar": "mar",
-        "net_profit": "net_profit",
-    }[sort_by]
-    # Replace inf with a very large number so sorting works predictably
+    sort_col = SORT_COLUMNS[sort_by]
     ranked = results.sort_values(sort_col, ascending=False).head(top).reset_index(drop=True)
-
     best = ranked.iloc[0]
 
     header_cards = [
@@ -287,7 +168,6 @@ def render_html(
         ("RR", lambda r, i: _cell(r["rr"], lambda v: _fmt_num(v, ".2f"))),
         ("Net", lambda r, i: _cell(r["net_profit"], _fmt_yen)),
     ]
-
     thead = "<tr>" + "".join(f"<th>{html_lib.escape(c[0])}</th>" for c in columns) + "</tr>"
     rows = []
     for i, row in ranked.iterrows():
@@ -301,17 +181,13 @@ def render_html(
 <head><meta charset="utf-8"><title>{html_lib.escape(title)}</title><style>{_CSS}</style></head>
 <body>
 <h1>{html_lib.escape(title)}</h1>
-<p class="muted">
-  グリッドサーチ結果 — {sort_by.upper()} 降順、上位 {top} 件
-</p>
+<p class="muted">グリッドサーチ結果 — {sort_by.upper()} 降順、上位 {top} 件</p>
 <div class="summary">{cards_html}</div>
 <div class="section">
   <h2>上位パラメータ一覧</h2>
   {table_html}
 </div>
-<p class="muted">
-  全 {len(results):,} 通りのうち {len(ranked)} 件を表示。CSV で全件を保存するには <code>--csv</code> を指定。
-</p>
+<p class="muted">全 {len(results):,} 通りのうち {len(ranked)} 件を表示。CSV で全件を保存するには <code>--csv-out</code> を指定。</p>
 </body>
 </html>"""
 
@@ -331,12 +207,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--start", default=None)
     p.add_argument("--end", default=None)
 
-    p.add_argument("--fast", default="10,15,20,30", help="Comma list of fast SMA periods")
-    p.add_argument("--slow", default="30,50,75,100", help="Comma list of slow SMA periods")
-    p.add_argument("--rsi-period", default="14", help="Comma list of RSI periods")
-    p.add_argument("--rsi-upper", default="70", help="Comma list of RSI upper thresholds")
-    p.add_argument("--rsi-lower", default="30", help="Comma list of RSI lower thresholds")
-    p.add_argument("--stop-atr", default="none,1.25,2.0", help="Comma list of stop mults, or 'none'")
+    p.add_argument("--fast", default="10,15,20,30")
+    p.add_argument("--slow", default="30,50,75,100")
+    p.add_argument("--rsi-period", default="14")
+    p.add_argument("--rsi-upper", default="70")
+    p.add_argument("--rsi-lower", default="30")
+    p.add_argument("--stop-atr", default="none,1.25,2.0")
 
     p.add_argument("--size", type=float, default=10_000.0)
     p.add_argument("--spread", type=float, default=0.02)
@@ -345,16 +221,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sort-by", choices=SORT_CHOICES, default="pf")
     p.add_argument("--top", type=int, default=30)
     p.add_argument(
-        "--html",
-        type=Path,
-        nargs="?",
-        const=Path("results/grid.html"),
+        "--html", type=Path, nargs="?", const=Path("results/grid.html"),
         help="Write ranking HTML (default: results/grid.html)",
     )
     p.add_argument(
-        "--open",
-        action=argparse.BooleanOptionalAction,
-        default=True,
+        "--open", action=argparse.BooleanOptionalAction, default=True,
         help="Open the HTML in a browser after writing",
     )
     p.add_argument("--csv-out", type=Path, help="Optional CSV file of all combos")
@@ -385,15 +256,15 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     combos = generate_combos(
-        fast=_parse_list(args.fast, int),
-        slow=_parse_list(args.slow, int),
-        rsi_period=_parse_list(args.rsi_period, int),
-        rsi_upper=_parse_list(args.rsi_upper, float),
-        rsi_lower=_parse_list(args.rsi_lower, float),
-        stop_atr=_parse_list(args.stop_atr, float),
+        fast=parse_param_list(args.fast, int),
+        slow=parse_param_list(args.slow, int),
+        rsi_period=parse_param_list(args.rsi_period, int),
+        rsi_upper=parse_param_list(args.rsi_upper, float),
+        rsi_lower=parse_param_list(args.rsi_lower, float),
+        stop_atr=parse_param_list(args.stop_atr, float),
     )
     if not combos:
-        print("No valid combinations (check fast<slow and rsi_lower<rsi_upper).", file=sys.stderr)
+        print("No valid combinations.", file=sys.stderr)
         return 1
 
     print(f"Bars       : {len(df):,}", file=sys.stderr)
@@ -405,9 +276,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = BacktestConfig(size=args.size, spread=args.spread, initial_equity=args.equity)
     results = grid_search(df, combos, cfg)
 
-    # Console top 10
-    sort_col = {"pf": "pf", "sharpe": "sharpe", "cagr": "cagr",
-                "mar": "mar", "net_profit": "net_profit"}[args.sort_by]
+    sort_col = SORT_COLUMNS[args.sort_by]
     ranked = results.sort_values(sort_col, ascending=False).head(10)
     print("\nTop 10:")
     print(
@@ -435,11 +304,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nCSV saved: {args.csv_out.resolve()}")
 
     if args.html:
-        context = {
-            "start": df.index[0],
-            "end": df.index[-1],
-            "bars": len(df),
-        }
+        context = {"start": df.index[0], "end": df.index[-1], "bars": len(df)}
         html = render_html(results, args.sort_by, args.top, args.title, context)
         args.html.parent.mkdir(parents=True, exist_ok=True)
         args.html.write_text(html, encoding="utf-8")

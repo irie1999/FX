@@ -87,6 +87,26 @@ python tools/grid_search.py --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" \
 - `--csv-out` で全組み合わせの結果を CSV 保存（分析・可視化に利用）
 - `fast >= slow` や `rsi_lower >= rsi_upper` の組み合わせは自動除外
 
+## ウォークフォワード検証
+
+`tools/walk_forward.py` は「各窓で再最適化 → 次の窓で OOS 検証」を繰り返し、**カーブフィットを見抜く**ための仕組みです。
+
+```bash
+python tools/walk_forward.py --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" \
+    --resample 1d --equity 500000 \
+    --train 540 --test 180 --step 180 \
+    --fast 10,15,20,30 --slow 50,75,100 \
+    --rsi-period 14,21 --rsi-upper 60,70 --rsi-lower 30 \
+    --stop-atr 1.0,1.25,1.5,2.0 \
+    --sort-by pf --html results/wfa.html
+```
+
+- `--train` / `--test` / `--step` は **バー数**（`--resample` 後の本数）
+- 各窓: train 範囲でグリッドサーチ → ベストパラメータを test で OOS 検証
+- 全 test 区間を繋いで **OOS 資産推移** と集計指標を算出
+- HTML レポートには窓ごとの詳細 + パラメータ安定性（どのパラメータが何回選ばれたか）も含む
+- 判定: **OOS PF > 1.5 なら本物**、OOS PF < 1.0 ならカーブフィット
+
 ## HTML レポート出力
 
 バックテスト結果を自己完結型の HTML レポートとして書き出せます（チャートは base64 PNG で埋め込み、外部リソース依存なし）。
