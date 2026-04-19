@@ -46,6 +46,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--save-equity", type=Path, help="Optional CSV path to save equity curve")
     p.add_argument("--save-trades", type=Path, help="Optional CSV path to save trades")
+    p.add_argument(
+        "--html",
+        type=Path,
+        nargs="?",
+        const=Path("results/report.html"),
+        help="Write an HTML report to PATH (default: results/report.html)",
+    )
+    p.add_argument("--open", action="store_true", help="Open the HTML report in a browser")
+    p.add_argument("--title", default="FX Backtest Report", help="Title in the HTML report")
     return p
 
 
@@ -87,6 +96,17 @@ def main(argv: list[str] | None = None) -> int:
         result.equity.to_csv(args.save_equity, header=["equity"])
     if args.save_trades:
         result.trades.to_csv(args.save_trades, index=False)
+
+    if args.html:
+        # Lazy import so matplotlib isn't required unless the user wants HTML.
+        from .report import write_html
+
+        out = write_html(args.html, result, perf, params, cfg, title=args.title)
+        print(f"HTML report: {out.resolve()}")
+        if args.open:
+            import webbrowser
+
+            webbrowser.open(out.resolve().as_uri())
 
     return 0
 

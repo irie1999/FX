@@ -66,6 +66,30 @@ python -m fx.main --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" --resample 1h
 
 `--out` で保存先を変えられます。既に同名 CSV があればスキップします。
 
+## HTML レポート出力
+
+バックテスト結果を自己完結型の HTML レポートとして書き出せます（チャートは base64 PNG で埋め込み、外部リソース依存なし）。
+
+```bash
+# デフォルトの保存先 results/report.html
+python -m fx.main --synthetic --bars 5000 --html
+
+# 保存先を指定
+python -m fx.main --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" --resample 1h \
+    --html results/usdjpy_1h.html --title "USDJPY 1h backtest"
+
+# 生成後にブラウザで自動オープン
+python -m fx.main --synthetic --html --open
+```
+
+レポートに含まれる内容:
+- パフォーマンス指標（Total Return / Sharpe / Max DD / 勝率 / PF ほか）
+- パラメータ・期間・スプレッド設定
+- エクイティカーブとドローダウン
+- 価格チャート（SMA ・売買シグナルのマーカー付き）
+- トレード別 PnL の棒グラフ
+- トレード一覧（先頭 50 件）
+
 主要オプション:
 
 - `--fast` 短期 SMA 期間 (default 20)
