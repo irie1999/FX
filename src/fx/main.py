@@ -53,7 +53,12 @@ def _build_parser() -> argparse.ArgumentParser:
         const=Path("results/report.html"),
         help="Write an HTML report to PATH (default: results/report.html)",
     )
-    p.add_argument("--open", action="store_true", help="Open the HTML report in a browser")
+    p.add_argument(
+        "--open",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Open the HTML report in a browser after writing (default: on). Use --no-open to disable.",
+    )
     p.add_argument("--title", default="FX Backtest Report", help="Title in the HTML report")
     return p
 
