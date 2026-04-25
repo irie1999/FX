@@ -63,8 +63,16 @@ class Broker:
     def get_position(self, instrument: str) -> Position:
         raise NotImplementedError
 
-    def market_order(self, instrument: str, units: int) -> OrderResult:
+    def market_order(
+        self,
+        instrument: str,
+        units: int,
+        stop_distance: float | None = None,
+    ) -> OrderResult:
         """Place a market order. Positive units = buy, negative = sell.
+
+        If `stop_distance` is set (price units, > 0), attach a server-side
+        stop-loss at `fill_price ∓ stop_distance` (− for long, + for short).
         Returns OrderResult reflecting fill state.
         """
         raise NotImplementedError
@@ -94,6 +102,8 @@ class PaperBroker(Broker):
         self._last_prices: dict[str, float] = {}
         self._candles: dict[str, list[PriceBar]] = {}
         self._order_counter = 0
+        # instrument -> (stop_price, side)  side = +1 long, -1 short
+        self._stops: dict[str, tuple[float, int]] = {}
 
     # helpers to feed data for tests / offline dry runs
     def set_candles(self, instrument: str, candles: list[PriceBar]) -> None:
@@ -115,7 +125,12 @@ class PaperBroker(Broker):
             pos.unrealized_pnl = (price - pos.avg_price) * pos.units
         return pos
 
-    def market_order(self, instrument: str, units: int) -> OrderResult:
+    def market_order(
+        self,
+        instrument: str,
+        units: int,
+        stop_distance: float | None = None,
+    ) -> OrderResult:
         if units == 0:
             return OrderResult(success=False, error="units=0")
         price = self._last_prices.get(instrument)
@@ -161,12 +176,67 @@ class PaperBroker(Broker):
                 new_avg = fill_price
 
         self._positions[instrument] = Position(units=new_units, avg_price=new_avg)
+
+        # Manage attached stop. Closing or flipping invalidates the prior one;
+        # a new stop is registered against whatever side the new position takes.
+        if new_units == 0:
+            self._stops.pop(instrument, None)
+        elif stop_distance is not None and stop_distance > 0:
+            side = 1 if new_units > 0 else -1
+            stop_price = fill_price - side * stop_distance
+            self._stops[instrument] = (stop_price, side)
+        elif (pos.units > 0) != (new_units > 0) or pos.units == 0:
+            # New position (entry or flip) without a stop_distance — clear any
+            # stale stop from the previous side.
+            self._stops.pop(instrument, None)
+
         self._order_counter += 1
         return OrderResult(
             success=True,
             order_id=f"paper-{self._order_counter}",
             filled_units=units,
             filled_price=fill_price,
+        )
+
+    def check_stops(
+        self,
+        instrument: str,
+        high: float,
+        low: float,
+    ) -> OrderResult | None:
+        """Simulate intrabar stop-out using a bar's high/low.
+
+        Mirrors backtest semantics: a long is stopped if `low <= stop_price`,
+        a short if `high >= stop_price`. On trigger, the position is forced
+        flat at the stop price (slippage = 0; tightens the simulation versus
+        the half-spread fill the real broker would suffer, but is consistent
+        with the backtest's `_apply_stops` accounting).
+        """
+        entry = self._stops.get(instrument)
+        if entry is None:
+            return None
+        stop_price, side = entry
+        triggered = (side > 0 and low <= stop_price) or (side < 0 and high >= stop_price)
+        if not triggered:
+            return None
+
+        pos = self._positions.get(instrument, Position(units=0))
+        if pos.units == 0:
+            self._stops.pop(instrument, None)
+            return None
+
+        closed_units = -pos.units
+        realized = (stop_price - pos.avg_price) * (1 if pos.units > 0 else -1) * abs(pos.units)
+        self.cash += realized
+        self._positions[instrument] = Position(units=0)
+        self._stops.pop(instrument, None)
+        self._last_prices[instrument] = stop_price
+        self._order_counter += 1
+        return OrderResult(
+            success=True,
+            order_id=f"paper-stop-{self._order_counter}",
+            filled_units=closed_units,
+            filled_price=stop_price,
         )
 
 
@@ -285,18 +355,27 @@ class OandaBroker(Broker):
             return Position(units=short_units, avg_price=avg, unrealized_pnl=upl)
         return Position(units=0)
 
-    def market_order(self, instrument: str, units: int) -> OrderResult:
+    def market_order(
+        self,
+        instrument: str,
+        units: int,
+        stop_distance: float | None = None,
+    ) -> OrderResult:
         if units == 0:
             return OrderResult(success=False, error="units=0")
-        body = {
-            "order": {
-                "instrument": instrument,
-                "units": str(units),
-                "type": "MARKET",
-                "timeInForce": "FOK",
-                "positionFill": "DEFAULT",
-            }
+        order: dict[str, Any] = {
+            "instrument": instrument,
+            "units": str(units),
+            "type": "MARKET",
+            "timeInForce": "FOK",
+            "positionFill": "DEFAULT",
         }
+        if stop_distance is not None and stop_distance > 0:
+            order["stopLossOnFill"] = {
+                "distance": f"{stop_distance:.5f}",
+                "timeInForce": "GTC",
+            }
+        body = {"order": order}
         try:
             data = self._request(
                 "POST", f"/v3/accounts/{self.account}/orders", body=body

@@ -89,6 +89,7 @@ def reconcile_position(
     desired_units: int,
     logger: logging.Logger,
     dry_run: bool = False,
+    stop_distance: float | None = None,
 ) -> None:
     pos = broker.get_position(instrument)
     delta = desired_units - pos.units
@@ -100,15 +101,24 @@ def reconcile_position(
         "reconcile: current=%d desired=%d -> %s %d",
         pos.units, desired_units, verb, abs(delta),
     )
+    # Stop only attaches when the resulting position is non-flat. A pure
+    # close-out (desired=0) inherits no new stop.
+    attach_stop = stop_distance if desired_units != 0 else None
+    if attach_stop is not None:
+        logger.info("attaching stop: distance=%.5f (ATR-based)", attach_stop)
     if dry_run:
         logger.info("[dry-run] skipping order submission")
         return
-    result = broker.market_order(instrument, delta)
+    result = broker.market_order(instrument, delta, stop_distance=attach_stop)
     if result.success:
         logger.info(
             "filled order id=%s units=%+d @ %.5f",
             result.order_id, result.filled_units, result.filled_price,
         )
+        if attach_stop is not None:
+            side = 1 if desired_units > 0 else -1
+            anticipated = result.filled_price - side * attach_stop
+            logger.info("server-side stop anchored near %.5f", anticipated)
     else:
         logger.error("order failed: %s", result.error)
 
@@ -123,6 +133,8 @@ def run_once(
     logger: logging.Logger,
     dry_run: bool,
     lookback: int,
+    stop_atr: float = 0.0,
+    min_stop_distance: float = 0.0,
 ) -> None:
     logger.info("fetching %d %s candles for %s…", lookback, granularity, instrument)
     candles = broker.get_candles(instrument, granularity, lookback)
@@ -131,19 +143,47 @@ def run_once(
         return
     df = candles_to_df(candles)
     last_bar = df.index[-1]
-    last_close = df["close"].iloc[-1]
+    last_close = float(df["close"].iloc[-1])
+    last_high = float(df["high"].iloc[-1])
+    last_low = float(df["low"].iloc[-1])
+
+    # Paper broker only: simulate intrabar stop-out using the latest bar's
+    # high/low before reconciling. OANDA enforces server-side, so this is
+    # purely a fidelity tool for offline runs and tests.
+    if isinstance(broker, PaperBroker):
+        broker.set_last_price(instrument, last_close)
+        triggered = broker.check_stops(instrument, last_high, last_low)
+        if triggered is not None:
+            logger.info(
+                "paper stop hit @ %.5f -> position flat (units=%+d)",
+                triggered.filled_price, triggered.filled_units,
+            )
 
     signals = generate_signals(df, params)
     signals = apply_daytrade_rules(signals, dt_config)
 
     last_signal = int(signals["signal"].iloc[-1])
     desired_units = last_signal * size
+    last_atr = float(signals["atr"].iloc[-1]) if "atr" in signals.columns else 0.0
+
+    stop_distance: float | None = None
+    if stop_atr > 0 and desired_units != 0:
+        if not (last_atr > 0):
+            logger.warning(
+                "ATR not ready (last_atr=%.5f); skipping entry to avoid an "
+                "unprotected position", last_atr,
+            )
+            return
+        stop_distance = max(stop_atr * last_atr, min_stop_distance)
 
     logger.info(
-        "bar %s  close=%.5f  signal=%+d  desired_units=%+d",
-        last_bar, last_close, last_signal, desired_units,
+        "bar %s  close=%.5f  signal=%+d  desired_units=%+d  atr=%.5f",
+        last_bar, last_close, last_signal, desired_units, last_atr,
     )
-    reconcile_position(broker, instrument, desired_units, logger, dry_run)
+    reconcile_position(
+        broker, instrument, desired_units, logger, dry_run,
+        stop_distance=stop_distance,
+    )
 
 
 # ----------------------------------------------------------- CLI
@@ -184,6 +224,23 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rsi-upper", type=float, default=70.0)
     p.add_argument("--rsi-lower", type=float, default=30.0)
     p.add_argument("--adx-threshold", type=float, default=0.0)
+
+    p.add_argument(
+        "--stop-atr",
+        type=float,
+        default=0.0,
+        help="ATR-based stop-loss multiplier. Stop distance = N × ATR at "
+             "entry, attached server-side (OANDA stopLossOnFill) or simulated "
+             "(paper). 0 disables.",
+    )
+    p.add_argument(
+        "--min-stop-distance",
+        type=float,
+        default=0.05,
+        help="Minimum stop distance in price units (default 0.05 ≈ 5 pips for "
+             "JPY pairs). Use ~0.0005 for non-JPY pairs. Floors --stop-atr "
+             "to satisfy OANDA's minimum stop distance.",
+    )
 
     p.add_argument("--eod-utc", default="21:00",
                    help="End-of-day close time (UTC, HH:MM). Positions go flat from this time.")
@@ -238,6 +295,13 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("size          : %d units", args.size)
     logger.info("params        : fast=%d slow=%d rsi=%d", params.fast, params.slow, params.rsi_period)
     logger.info("EOD cutoff    : %s UTC", args.eod_utc)
+    if args.stop_atr > 0:
+        logger.info(
+            "stop          : ATR × %.2f (min distance %.5f)",
+            args.stop_atr, args.min_stop_distance,
+        )
+    else:
+        logger.info("stop          : disabled (--stop-atr 0)")
     logger.info("=" * 60)
 
     gran_seconds = GRANULARITY_SECONDS[args.granularity]
@@ -262,6 +326,8 @@ def main(argv: list[str] | None = None) -> int:
                     logger=logger,
                     dry_run=args.dry_run,
                     lookback=args.lookback,
+                    stop_atr=args.stop_atr,
+                    min_stop_distance=args.min_stop_distance,
                 )
             except Exception as exc:
                 logger.exception("iteration failed: %s", exc)
