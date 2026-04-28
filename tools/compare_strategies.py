@@ -277,6 +277,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--strategies", default=",".join(strategies.names()),
                    help="Comma list of strategies to run")
+    p.add_argument("--extra-csv", type=Path, default=None,
+                   help="Optional recent OHLC CSV appended onto histdata "
+                        "(e.g. fetched via tools/fetch_recent.py)")
     p.add_argument("--sort-by", choices=tuple(SORT_COLUMNS), default="pf")
     p.add_argument("--html", type=Path, nargs="?",
                    const=Path("results/compare.html"))
@@ -296,6 +299,12 @@ def _load_data(args) -> pd.DataFrame:
         df = data_mod.load_csv(args.csv)
     if args.resample:
         df = data_mod.resample_ohlc(df, args.resample)
+    extra = getattr(args, "extra_csv", None)
+    if extra is not None:
+        recent = data_mod.load_csv(extra)
+        if args.resample:
+            recent = data_mod.resample_ohlc(recent, args.resample)
+        df = data_mod.merge_recent(df, recent)
     if args.start or args.end:
         df = data_mod.slice_period(df, args.start, args.end)
     return df
