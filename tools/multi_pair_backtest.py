@@ -285,6 +285,12 @@ td.pos { color: var(--pos); font-weight: 500; }
 td.neg { color: var(--neg); font-weight: 500; }
 img { max-width: 100%; border: 1px solid var(--border); border-radius: 6px; }
 .section { margin: 2rem 0; }
+details { background: var(--panel); border: 1px solid var(--border);
+          border-radius: 6px; padding: 0.6rem 1rem; margin-bottom: 0.8rem; }
+details summary { cursor: pointer; padding: 0.3rem 0; color: var(--text);
+                  list-style: revert; }
+details[open] summary { border-bottom: 1px solid var(--border); margin-bottom: 0.6rem; }
+details-stack details + details { margin-top: 0.5rem; }
 """
 
 
@@ -313,6 +319,93 @@ def _cell(v, kind, positive_good=True):
         elif not positive_good and v < 0: cls = "pos"
         elif not positive_good and v > 0: cls = "neg"
     return f"<td class='{cls}'>{html_lib.escape(_fmt(v, kind))}</td>"
+
+
+def _format_trades_table(trades_df: pd.DataFrame, limit: int = 50,
+                          show_pair: bool = True) -> str:
+    if trades_df is None or len(trades_df) == 0:
+        return "<p class='muted'>トレードはありません</p>"
+
+    # Most recent first
+    df = trades_df.copy()
+    if "exit_time" in df.columns:
+        df = df.sort_values("exit_time", ascending=False)
+    shown = df.head(limit)
+
+    cols = []
+    if show_pair and "pair" in shown.columns:
+        cols.append("pair")
+    cols.extend(["entry_time", "exit_time", "side", "entry_price", "exit_price", "pnl"])
+
+    headers_jp = {
+        "pair": "通貨ペア",
+        "entry_time": "エントリー時刻",
+        "exit_time": "決済時刻",
+        "side": "方向",
+        "entry_price": "エントリー価格",
+        "exit_price": "決済価格",
+        "pnl": "損益 (JPY)",
+    }
+    thead = "<tr>" + "".join(
+        f"<th>{html_lib.escape(headers_jp[c])}</th>" for c in cols
+    ) + "</tr>"
+
+    body_rows = []
+    for _, row in shown.iterrows():
+        cells: list[str] = []
+        for c in cols:
+            if c == "pair":
+                cells.append(f"<td>{html_lib.escape(str(row[c]))}</td>")
+            elif c == "side":
+                side_label = "買い" if int(row[c]) == 1 else "売り"
+                cells.append(f"<td>{side_label}</td>")
+            elif c in ("entry_time", "exit_time"):
+                ts = row[c]
+                cells.append(
+                    f"<td>{ts.strftime('%Y-%m-%d') if hasattr(ts, 'strftime') else html_lib.escape(str(ts))}</td>"
+                )
+            elif c in ("entry_price", "exit_price"):
+                cells.append(f"<td>{row[c]:.4f}</td>")
+            elif c == "pnl":
+                cells.append(_cell(row[c], "yen"))
+            else:
+                cells.append(f"<td>{html_lib.escape(str(row[c]))}</td>")
+        body_rows.append("<tr>" + "".join(cells) + "</tr>")
+
+    extra = ""
+    if len(df) > limit:
+        extra = (f"<p class='muted'>直近 {limit} 件 / 全 {len(df):,} 件を表示しています。</p>")
+    return (f"<table><thead>{thead}</thead><tbody>{''.join(body_rows)}</tbody></table>"
+            + extra)
+
+
+def _plot_per_trade_pnl(trades_df: pd.DataFrame) -> str | None:
+    if trades_df is None or len(trades_df) == 0:
+        return None
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    df = trades_df.sort_values("exit_time") if "exit_time" in trades_df.columns else trades_df
+    fig, ax = plt.subplots(figsize=(11, 3))
+    fig.patch.set_facecolor("#0e1117")
+    ax.set_facecolor("#161b22")
+    ax.tick_params(colors="#e6edf3")
+    for sp in ax.spines.values():
+        sp.set_color("#2a313c")
+    ax.grid(True, color="#2a313c", alpha=0.6, axis="y")
+
+    pnls = df["pnl"].values
+    colors = ["#3fb950" if v >= 0 else "#f85149" for v in pnls]
+    ax.bar(range(len(pnls)), pnls, color=colors, width=0.9)
+    ax.axhline(0, color="#8b949e", linewidth=0.6)
+    ax.set_xlabel("Trade #", color="#e6edf3")
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", dpi=110,
+                facecolor="#0e1117", edgecolor="none")
+    plt.close(fig)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 def _plot_combined_equity(results, portfolio_equity) -> str:
@@ -401,6 +494,36 @@ def render_html(results, portfolio, strategy_name, period, title) -> str:
         results, portfolio.get("equity") if portfolio else None
     )
 
+    # Per-trade PnL bar chart (combined, all pairs)
+    combined_trades = portfolio.get("trades") if portfolio else None
+    trade_pnl_b64 = _plot_per_trade_pnl(combined_trades)
+    trade_pnl_section = (
+        f'<div class="section"><h2>トレード別損益（全通貨）</h2>'
+        f'<img alt="trade-pnl" src="data:image/png;base64,{trade_pnl_b64}"></div>'
+        if trade_pnl_b64 else ""
+    )
+
+    # Recent combined trades (last 50 across pairs)
+    recent_trades_table = _format_trades_table(combined_trades, limit=50, show_pair=True)
+
+    # Per-pair trade detail (last 20 per pair, with JPY-converted PnL)
+    per_pair_blocks = []
+    for r in sorted(results, key=lambda x: x.perf_jpy["net_profit"], reverse=True):
+        if len(r.trades) == 0:
+            continue
+        t = r.trades.copy()
+        t["pnl"] = t["pnl"] * to_jpy(r.pair)
+        t["pair"] = r.pair
+        block = (
+            f"<details><summary><strong>{r.pair}</strong> "
+            f"({r.perf_jpy['num_trades']:,} トレード, "
+            f"純損益 {_fmt(r.perf_jpy['net_profit'], 'yen')})</summary>"
+            f"{_format_trades_table(t, limit=20, show_pair=False)}"
+            f"</details>"
+        )
+        per_pair_blocks.append(block)
+    per_pair_html = "<div class='details-stack'>" + "".join(per_pair_blocks) + "</div>"
+
     return f"""<!doctype html>
 <html lang="ja"><head><meta charset="utf-8">
 <title>{html_lib.escape(title)}</title><style>{_CSS}</style></head>
@@ -415,6 +538,16 @@ def render_html(results, portfolio, strategy_name, period, title) -> str:
 <div class="section">
   <h2>通貨別パフォーマンス</h2>
   {table_html}
+</div>
+{trade_pnl_section}
+<div class="section">
+  <h2>直近トレード一覧（全通貨、新しい順）</h2>
+  {recent_trades_table}
+</div>
+<div class="section">
+  <h2>通貨ペア別トレード詳細</h2>
+  <p class="muted">各通貨ペアの最新 20 件。クリックで展開。</p>
+  {per_pair_html}
 </div>
 </body></html>"""
 
