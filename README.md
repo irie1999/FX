@@ -108,6 +108,38 @@ python tools/walk_forward.py --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" \
 - HTML レポートには窓ごとの詳細 + パラメータ安定性（どのパラメータが何回選ばれたか）も含む
 - 判定: **OOS PF > 1.5 なら本物**、OOS PF < 1.0 ならカーブフィット
 
+## マルチ通貨ポートフォリオ
+
+複数の通貨ペアで同じ戦略を並列に走らせ、ポートフォリオとしての成績を計測します。**取引機会と分散効果**の両方を得られます。
+
+```bash
+# 過去データを各通貨で取得
+python tools/fetch_histdata.py --pair USDJPY --years 2020 2021 2022 2023 2024 2025
+python tools/fetch_histdata.py --pair EURUSD --years 2020 2021 2022 2023 2024 2025
+python tools/fetch_histdata.py --pair GBPUSD --years 2020 2021 2022 2023 2024 2025
+python tools/fetch_histdata.py --pair AUDUSD --years 2020 2021 2022 2023 2024 2025
+python tools/fetch_histdata.py --pair EURJPY --years 2020 2021 2022 2023 2024 2025
+
+# マルチ通貨バックテスト（ポートフォリオ）
+python tools/multi_pair_backtest.py \
+    --histdata-dir data/raw \
+    --pairs USDJPY,EURUSD,GBPUSD,AUDUSD,EURJPY \
+    --resample 1d --strategy adaptive --stop-atr 1.25 \
+    --size 1000 --equity-per-pair 100000 \
+    --html results/multi_pair.html --csv-out results/multi_pair.csv
+```
+
+仕様:
+- 各通貨ペアに `--equity-per-pair` (default ¥100,000) を独立配分
+- 各ペアの非 JPY PnL は概算レート（USD≈¥150, EUR≈¥165 等）で JPY 換算
+- ポートフォリオとして合計エクイティ・Sharpe・MaxDD を算出
+- HTML レポートは通貨別+合計の資産推移チャート、通貨別パフォーマンス表
+
+スプレッドは SBI 風のデフォルト値を使用、上書きしたい場合:
+```
+--spread-overrides "EURUSD=0.0001,GBPUSD=0.0002"
+```
+
 ## 毎朝のシグナル出力（手動発注向け）
 
 SBI FX トレード等の自動売買 API が無い業者で運用する場合、**毎朝アルゴリズムの指示を確認 → 手でアプリから発注** というフローが現実的です。そのための専用ツール:
