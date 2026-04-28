@@ -127,6 +127,22 @@ def resample_ohlc(df: pd.DataFrame, rule: str) -> pd.DataFrame:
     return out.dropna(how="any")
 
 
+def merge_recent(historical: pd.DataFrame, recent: pd.DataFrame) -> pd.DataFrame:
+    """Append recent bars onto historical, deduplicating by timestamp.
+
+    Where the same timestamp appears in both inputs the `recent` row
+    wins — fresher data corrects any older HistData bar at the same
+    instant. Both DataFrames must have a tz-aware DatetimeIndex and the
+    standard OHLC columns.
+    """
+    cols = list(REQUIRED_COLS)
+    h = historical[cols].copy() if len(historical) else historical
+    r = recent[cols].copy() if len(recent) else recent
+    combined = pd.concat([h, r])
+    combined = combined[~combined.index.duplicated(keep="last")]
+    return combined.sort_index()
+
+
 def load_csv(path: str | Path) -> pd.DataFrame:
     """Load OHLC data from CSV.
 

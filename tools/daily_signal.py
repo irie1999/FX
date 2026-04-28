@@ -262,6 +262,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rsi-upper", type=float, default=70.0)
     p.add_argument("--rsi-lower", type=float, default=30.0)
 
+    p.add_argument(
+        "--extra-csv", type=Path, default=None,
+        help="Optional CSV (timestamp,open,high,low,close) appended on top of "
+             "histdata for fresher recent data (e.g. fetched via tools/fetch_recent.py)",
+    )
     p.add_argument("--output", type=Path, help="Write the report to PATH (text)")
     p.add_argument("--json", type=Path, help="Write a JSON payload to PATH")
     p.add_argument("--webhook", help="Slack/Discord webhook URL to POST the report to")
@@ -276,6 +281,15 @@ def _load_data(args) -> pd.DataFrame:
         df = data_mod.load_csv(args.csv)
     if args.resample:
         df = data_mod.resample_ohlc(df, args.resample)
+
+    extra = getattr(args, "extra_csv", None)
+    if extra is not None:
+        recent = data_mod.load_csv(extra)
+        # If the recent CSV is at a different (e.g. daily) granularity than
+        # the resampled historical, ensure both share the same frequency.
+        if args.resample:
+            recent = data_mod.resample_ohlc(recent, args.resample)
+        df = data_mod.merge_recent(df, recent)
     return df
 
 

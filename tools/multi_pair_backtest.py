@@ -144,6 +144,7 @@ def run_pair(
     stop_atr: float | None,
     start: str | None,
     end: str | None,
+    extra_dir: Path | None = None,
 ) -> PairResult | None:
     files = find_files(histdata_dir, pair)
     if not files:
@@ -154,6 +155,15 @@ def run_pair(
     df = data_mod.load_histdata(files)
     if resample:
         df = data_mod.resample_ohlc(df, resample)
+
+    if extra_dir is not None:
+        extra_csv = extra_dir / f"{pair.upper()}.csv"
+        if extra_csv.exists():
+            recent = data_mod.load_csv(extra_csv)
+            if resample:
+                recent = data_mod.resample_ohlc(recent, resample)
+            df = data_mod.merge_recent(df, recent)
+
     if start or end:
         df = data_mod.slice_period(df, start, end)
     if len(df) == 0:
@@ -634,6 +644,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--eval-days", type=int, default=None,
                    help="Only report on the last N days per pair (the strategy "
                         "still warms up on full data). Useful for recent perf checks.")
+    p.add_argument(
+        "--extra-dir", type=Path, default=None,
+        help="Directory containing recent OHLC CSVs (timestamp,open,high,low,close) "
+             "named <PAIR>.csv. Files there are appended on top of histdata for "
+             "fresher recent data (e.g. fetched via tools/fetch_recent.py).",
+    )
 
     p.add_argument("--html", type=Path, nargs="?",
                    const=Path("results/multi_pair.html"))
@@ -674,6 +690,7 @@ def main(argv: list[str] | None = None) -> int:
                 stop_atr=args.stop_atr,
                 start=args.start,
                 end=args.end,
+                extra_dir=args.extra_dir,
             )
         except Exception as exc:
             print(f"[error] {pair}: {exc}", file=sys.stderr)

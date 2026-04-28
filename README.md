@@ -108,6 +108,43 @@ python tools/walk_forward.py --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" \
 - HTML レポートには窓ごとの詳細 + パラメータ安定性（どのパラメータが何回選ばれたか）も含む
 - 判定: **OOS PF > 1.5 なら本物**、OOS PF < 1.0 ならカーブフィット
 
+## 直近データの取得 (yfinance)
+
+HistData は **完了月** までしか配信しないので、現在月のデータは取得できません。Yahoo Finance なら**昨日まで**の日足が取れるので、それを HistData に上乗せして使います。
+
+```bash
+pip install yfinance   # 初回のみ
+
+# 1 通貨だけ取得
+python tools/fetch_recent.py --pair USDJPY --period 60d
+
+# 5 通貨まとめて取得（PowerShell）
+foreach ($pair in 'USDJPY','EURUSD','GBPUSD','AUDUSD','EURJPY') {
+    python tools/fetch_recent.py --pair $pair --period 90d
+}
+```
+
+`data/recent/<PAIR>.csv` に保存されます。これを HistData に上乗せして使う:
+
+```bash
+# 単一通貨のシグナル（直近データ込み）
+python tools/daily_signal.py \
+    --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" \
+    --extra-csv "data/recent/USDJPY.csv" \
+    --resample 1d --strategy adaptive --size 1000 --stop-atr 1.25
+
+# マルチ通貨バックテスト（直近データ込み）
+python tools/multi_pair_backtest.py \
+    --histdata-dir data/raw \
+    --extra-dir data/recent \
+    --pairs USDJPY,EURUSD,GBPUSD,AUDUSD,EURJPY \
+    --resample 1d --strategy adaptive --stop-atr 1.25 \
+    --size 1000 --equity-per-pair 100000 --eval-days 30 \
+    --html results/multi_pair_30d.html
+```
+
+`merge_recent` は同じタイムスタンプで重複した場合 **recent 側を優先** するので、HistData の境界バーが yfinance の値で上書きされる挙動になります。
+
 ## マルチ通貨ポートフォリオ
 
 複数の通貨ペアで同じ戦略を並列に走らせ、ポートフォリオとしての成績を計測します。**取引機会と分散効果**の両方を得られます。

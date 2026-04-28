@@ -2,3 +2,5 @@ numpy>=1.24
 pandas>=2.0
 matplotlib>=3.7
 pytest>=7.4
+# Optional: only needed for tools/fetch_recent.py (Yahoo Finance fetcher)
+yfinance>=0.2.40
