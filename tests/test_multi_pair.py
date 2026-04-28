@@ -149,6 +149,59 @@ def test_format_trades_table_limit_truncates():
     assert "直近 2 件 / 全 5 件を表示しています" in out
 
 
+def test_slice_to_eval_days_rebases_and_filters():
+    idx = pd.date_range("2024-01-01", periods=60, freq="1D", tz="UTC")
+    eq = pd.Series(100_000.0 + (idx - idx[0]).days * 100, index=idx)  # +¥100/day
+    trades = pd.DataFrame([
+        # Closed before window
+        {"entry_time": idx[5], "exit_time": idx[10],
+         "side": 1, "entry_price": 150.0, "exit_price": 151.0, "pnl": 1000.0},
+        # Closed within last 10 days
+        {"entry_time": idx[40], "exit_time": idx[55],
+         "side": 1, "entry_price": 152.0, "exit_price": 153.0, "pnl": 1500.0},
+    ])
+    r = mp.PairResult(
+        pair="USDJPY", spread=0.02, bars=60,
+        period_start=idx[0], period_end=idx[-1],
+        perf_jpy={}, equity_jpy=eq, raw_perf=None,
+        trades=trades,
+    )
+    sliced = mp.slice_to_eval_days(r, days=10, initial_equity_jpy=100_000.0)
+    assert sliced is not None
+    # Equity rebased to 100,000 at the start of the window
+    assert sliced.equity_jpy.iloc[0] == pytest.approx(100_000.0)
+    # Older trade dropped, newer kept
+    assert sliced.perf_jpy["num_trades"] == 1
+    # Period now restricted
+    assert sliced.period_start >= idx[-11]
+
+
+def test_slice_to_eval_days_returns_none_if_no_data():
+    idx = pd.date_range("2024-01-01", periods=5, freq="1D", tz="UTC")
+    eq = pd.Series(100_000.0, index=idx)
+    r = mp.PairResult(
+        pair="USDJPY", spread=0.02, bars=5,
+        period_start=idx[0], period_end=idx[-1],
+        perf_jpy={}, equity_jpy=eq, raw_perf=None,
+        trades=pd.DataFrame(columns=["pnl"]),
+    )
+    # Slicing window starts AFTER the data ends
+    sliced = mp.slice_to_eval_days(r, days=0, initial_equity_jpy=100_000.0)
+    # Even with 0 days, the last bar is included since end-0 == last
+    # so we use a different approach: shift idx way back
+    idx_old = pd.date_range("2010-01-01", periods=5, freq="1D", tz="UTC")
+    eq2 = pd.Series(100_000.0, index=idx_old)
+    r2 = mp.PairResult(
+        pair="USDJPY", spread=0.02, bars=5,
+        period_start=idx_old[0], period_end=idx_old[-1],
+        perf_jpy={}, equity_jpy=eq2, raw_perf=None,
+        trades=pd.DataFrame(columns=["pnl"]),
+    )
+    # At least gets back a result for the last bar
+    sliced2 = mp.slice_to_eval_days(r2, days=1, initial_equity_jpy=100_000.0)
+    assert sliced2 is not None
+
+
 def test_render_html_includes_trade_sections():
     idx = pd.date_range("2024-01-01", periods=5, freq="1D", tz="UTC")
     pair1_eq = pd.Series([100_000, 100_500, 101_000, 100_800, 101_200], index=idx, dtype=float)

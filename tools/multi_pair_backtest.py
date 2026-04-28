@@ -214,6 +214,62 @@ def run_pair(
     )
 
 
+def slice_to_eval_days(r: PairResult, days: int, initial_equity_jpy: float) -> PairResult | None:
+    """Return a new PairResult restricted to the last `days` calendar days.
+
+    The strategy already consumed its full warmup when run_pair() generated
+    the signals, so we just slice the resulting equity / trades and rebase
+    the equity curve to start at `initial_equity_jpy` for the window.
+    """
+    end = r.equity_jpy.index[-1]
+    start = end - pd.Timedelta(days=days)
+    mask = r.equity_jpy.index >= start
+    if not mask.any():
+        return None
+
+    eq_slice = r.equity_jpy[mask]
+    start_eq = float(eq_slice.iloc[0])
+    adjusted_eq = initial_equity_jpy + (eq_slice - start_eq)
+
+    if len(r.trades) > 0 and "exit_time" in r.trades.columns:
+        t = r.trades[r.trades["exit_time"] >= start].reset_index(drop=True).copy()
+    else:
+        t = r.trades.copy() if r.trades is not None else pd.DataFrame()
+
+    pnl_series = adjusted_eq.diff().fillna(0.0)
+    perf = compute_performance(
+        adjusted_eq, pnl_series,
+        # Trade-level pnl is in the original quote currency for this view, so
+        # convert here too. (run_pair already kept .trades in quote ccy.)
+        t.assign(pnl=lambda d: d["pnl"] * to_jpy(r.pair)) if len(t) else t,
+        initial_equity_jpy,
+    )
+    perf_dict = {
+        "pf": perf.profit_factor,
+        "sharpe": perf.sharpe,
+        "cagr": perf.cagr,
+        "total_return": perf.total_return,
+        "max_dd": perf.max_drawdown,
+        "win_rate": perf.win_rate,
+        "num_trades": perf.num_trades,
+        "net_profit": perf.net_profit,
+        "rr": perf.risk_reward,
+        "best": perf.best_trade,
+        "worst": perf.worst_trade,
+    }
+    return PairResult(
+        pair=r.pair,
+        spread=r.spread,
+        bars=int(mask.sum()),
+        period_start=eq_slice.index[0],
+        period_end=eq_slice.index[-1],
+        perf_jpy=perf_dict,
+        equity_jpy=adjusted_eq,
+        raw_perf=perf,
+        trades=t,
+    )
+
+
 # --------------------------------------------------- portfolio aggregation
 
 
@@ -575,6 +631,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--spread-overrides",
                    help="Override default spreads, e.g. 'EURUSD=0.0001,GBPUSD=0.0002'")
+    p.add_argument("--eval-days", type=int, default=None,
+                   help="Only report on the last N days per pair (the strategy "
+                        "still warms up on full data). Useful for recent perf checks.")
 
     p.add_argument("--html", type=Path, nargs="?",
                    const=Path("results/multi_pair.html"))
@@ -633,6 +692,22 @@ def main(argv: list[str] | None = None) -> int:
     if not results:
         print("No pair produced any results.", file=sys.stderr)
         return 1
+
+    if args.eval_days is not None:
+        sliced: list[PairResult] = []
+        for r in results:
+            s = slice_to_eval_days(r, args.eval_days, args.equity_per_pair)
+            if s is not None:
+                sliced.append(s)
+        if not sliced:
+            print(f"No bars within the last {args.eval_days} days for any pair.",
+                  file=sys.stderr)
+            return 1
+        results = sliced
+        print(f"\n[eval-days={args.eval_days}] sliced each pair to the last "
+              f"{args.eval_days} days. Trade counts:", file=sys.stderr)
+        for r in results:
+            print(f"  {r.pair}: {r.perf_jpy['num_trades']} trades", file=sys.stderr)
 
     initial_total_jpy = args.equity_per_pair * len(results)
     portfolio = aggregate_portfolio(results, initial_total_jpy)
