@@ -12,7 +12,7 @@ Each module exposes:
 
 from __future__ import annotations
 
-from . import bollinger, donchian, ichimoku, macd, orb, sma_rsi, supertrend
+from . import bbs, bollinger, donchian, ichimoku, macd, orb, sma_rsi, supertrend, tsmom
 from . import adaptive   # imports peer modules above, so must come last
 
 REGISTRY = {
@@ -23,6 +23,8 @@ REGISTRY = {
     macd.NAME: macd,
     supertrend.NAME: supertrend,
     ichimoku.NAME: ichimoku,
+    tsmom.NAME: tsmom,
+    bbs.NAME: bbs,
     adaptive.NAME: adaptive,
 }
 

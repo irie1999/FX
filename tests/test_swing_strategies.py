@@ -117,6 +117,7 @@ def test_registry_contains_all_strategies():
     assert set(strategies.names()) == {
         "sma_rsi", "orb", "bollinger", "donchian",
         "macd", "supertrend", "ichimoku", "adaptive",
+        "tsmom", "bbs",
     }
 
 

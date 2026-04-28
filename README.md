@@ -145,6 +145,54 @@ python tools/multi_pair_backtest.py \
 
 `merge_recent` は同じタイムスタンプで重複した場合 **recent 側を優先** するので、HistData の境界バーが yfinance の値で上書きされる挙動になります。
 
+## 学術ベースの追加戦略
+
+論文ベースで実装した、より高い利益を狙える戦略 3 つ。
+
+### 1. 時系列モメンタム (TSMOM)
+
+Moskowitz, Ooi, Pedersen (2012) *"Time Series Momentum"* (JFE)
+
+過去 N バーの累積リターンの正負で次バーの方向を予測。学術的に最強クラスの単純戦略 (Sharpe 1.5、年率 17% を 1985-2009 で実証)。
+
+```bash
+python -m fx.main --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" \
+    --resample 1d --strategy tsmom --stop-atr 1.25 --size 1000 --html
+```
+
+### 2. BB スクイーズ・ブレイクアウト (BBS)
+
+ボリンジャーバンドの幅が直近最低水準（スクイーズ）まで縮んだ後の急騰急落を狙う。
+
+```bash
+python -m fx.main --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" \
+    --resample 1d --strategy bbs --stop-atr 1.25 --size 1000 --html
+```
+
+### 3. 統計的裁定取引 (Pairs Trading)
+
+Gatev et al. (2006), Avellaneda & Lee (2010)。相関の高い 2 通貨ペアの「ズレ」を取る market-neutral 戦略。
+
+```bash
+python tools/pairs_trading.py \
+    --histdata-dir data/raw \
+    --pair-a EURUSD --pair-b GBPUSD \
+    --resample 1d --size 1000 --equity 200000 \
+    --z-window 60 --entry-z 2.0 --exit-z 0.5 \
+    --html results/pairs_eurgbp.html
+```
+
+z スコアが ±2.0 を超えたらスプレッドを売買、|z| < 0.5 で利確、|z| > 4.0 で逆指値。市場全体の方向性に関係なく動くので、他戦略と相関ゼロの分散効果。
+
+### 比較
+
+```bash
+python tools/compare_strategies.py --histdata "data/raw/DAT_ASCII_USDJPY_M1_*.csv" \
+    --resample 1d --equity 500000 --stop-atr 1.25 --swing \
+    --strategies sma_rsi,tsmom,bbs,supertrend,ichimoku,adaptive \
+    --html results/swing_compare_extended.html
+```
+
 ## マルチ通貨ポートフォリオ
 
 複数の通貨ペアで同じ戦略を並列に走らせ、ポートフォリオとしての成績を計測します。**取引機会と分散効果**の両方を得られます。
